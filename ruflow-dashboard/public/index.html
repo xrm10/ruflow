@@ -21,8 +21,8 @@
         <button class="rail-item active" data-view="memory">
           <span class="rail-ico">🧠</span><span>Memory</span>
         </button>
-        <button class="rail-item" data-view="agents" disabled title="Next building block">
-          <span class="rail-ico">🤖</span><span>Agents</span><span class="soon">soon</span>
+        <button class="rail-item" data-view="agents">
+          <span class="rail-ico">🤖</span><span>Agents</span>
         </button>
         <button class="rail-item" data-view="learning" disabled title="Next building block">
           <span class="rail-ico">📈</span><span>Learning</span><span class="soon">soon</span>
@@ -39,7 +39,9 @@
 
     <!-- Main -->
     <main id="main">
-      <header id="page-head">
+      <!-- Memory view -->
+      <div id="view-memory" class="view">
+      <header class="page-head">
         <div>
           <h1>Long-term Memory</h1>
           <p class="subtitle">Persistent knowledge the assistant carries across every session.</p>
@@ -93,6 +95,41 @@
         <div class="empty-mark">🗒️</div>
         <p id="empty-text">No memories yet.</p>
       </div>
+      </div><!-- /view-memory -->
+
+      <!-- Agents view -->
+      <div id="view-agents" class="view" hidden>
+        <header class="page-head">
+          <div>
+            <h1>Agents</h1>
+            <p class="subtitle">Specialized agents you can dispatch to coding, analysis, and ops tasks.</p>
+          </div>
+          <button id="agents-refresh" class="ghost-btn" title="Refresh">↻ Refresh</button>
+        </header>
+
+        <section class="stat-row" aria-label="Agent statistics">
+          <div class="stat-tile"><div class="stat-val" id="ag-total">—</div><div class="stat-lbl">Agents</div></div>
+          <div class="stat-tile"><div class="stat-val" id="ag-cats">—</div><div class="stat-lbl">Categories</div></div>
+          <div class="stat-tile"><div class="stat-val" id="ag-tools">—</div><div class="stat-lbl">Tool-enabled</div></div>
+          <div class="stat-tile"><div class="stat-val" id="ag-shown">—</div><div class="stat-lbl">Showing</div></div>
+        </section>
+
+        <section id="agents-toolbar">
+          <div class="search-wrap">
+            <span class="search-ico">🔍</span>
+            <input id="agent-search" type="search" placeholder="Search agents by name or description…" aria-label="Search agents" />
+          </div>
+          <select id="category-filter" aria-label="Filter by category">
+            <option value="">All categories</option>
+          </select>
+        </section>
+
+        <section id="agent-list" class="mem-grid" aria-live="polite"></section>
+        <div id="agents-empty" class="empty" hidden>
+          <div class="empty-mark">🤖</div>
+          <p>No agents match your filters.</p>
+        </div>
+      </div><!-- /view-agents -->
     </main>
   </div>
 
@@ -111,6 +148,53 @@
       </div>
     </div>
   </div>
+
+  <!-- Agent detail modal -->
+  <div id="agent-overlay" class="overlay" hidden>
+    <div class="agent-modal" role="dialog" aria-modal="true" aria-labelledby="agent-modal-name">
+      <button id="agent-close" class="modal-close" aria-label="Close">&times;</button>
+      <div class="agent-modal-head">
+        <h2 id="agent-modal-name"></h2>
+        <span id="agent-modal-cat" class="card-source"></span>
+      </div>
+      <p id="agent-modal-desc" class="agent-desc"></p>
+
+      <div class="agent-tools-block">
+        <div class="block-label" id="agent-tools-label">Tools</div>
+        <div id="agent-modal-tools" class="agent-tools"></div>
+      </div>
+
+      <div class="dispatch-box">
+        <label for="dispatch-task">Dispatch to a task</label>
+        <textarea id="dispatch-task" rows="2" placeholder="Describe the task for this agent…"></textarea>
+        <div class="dispatch-row">
+          <code id="dispatch-cmd"></code>
+          <button id="copy-cmd" class="primary-btn">Copy</button>
+        </div>
+        <p class="confirm-note">Paste into Claude Code (Task tool) or run via the CLI. Live in-dashboard execution is a later block.</p>
+      </div>
+
+      <details class="agent-body-wrap">
+        <summary>Full agent definition</summary>
+        <pre id="agent-modal-body"></pre>
+      </details>
+    </div>
+  </div>
+
+  <!-- Agent card template -->
+  <template id="agent-card-tpl">
+    <article class="mem-card agent-card">
+      <header class="card-head">
+        <h3 class="card-key"></h3>
+        <span class="card-source agent-cat"></span>
+      </header>
+      <p class="card-value agent-card-desc"></p>
+      <footer class="card-foot">
+        <span class="card-time agent-tool-count"></span>
+        <span class="agent-open">View →</span>
+      </footer>
+    </article>
+  </template>
 
   <!-- Card template -->
   <template id="card-tpl">

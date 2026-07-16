@@ -199,3 +199,138 @@ document.addEventListener('keydown', (e) => { if (e.key === 'Escape') closeConfi
 
 refresh();
 setInterval(loadStats, 15000); // keep tiles + backend status fresh
+
+// ===================================================================
+// View router
+// ===================================================================
+const views = {
+  memory: document.getElementById('view-memory'),
+  agents: document.getElementById('view-agents'),
+};
+const railItems = document.querySelectorAll('.rail-item[data-view]');
+let agentsLoaded = false;
+
+function showView(name) {
+  if (!views[name]) return;
+  for (const [k, v] of Object.entries(views)) v.hidden = (k !== name);
+  railItems.forEach(b => b.classList.toggle('active', b.dataset.view === name));
+  if (name === 'agents' && !agentsLoaded) loadAgents();
+}
+railItems.forEach(b => b.addEventListener('click', () => { if (!b.disabled) showView(b.dataset.view); }));
+
+// ===================================================================
+// Agents catalog
+// ===================================================================
+const ag = {
+  total: document.getElementById('ag-total'), cats: document.getElementById('ag-cats'),
+  tools: document.getElementById('ag-tools'), shown: document.getElementById('ag-shown'),
+  search: document.getElementById('agent-search'), catFilter: document.getElementById('category-filter'),
+  list: document.getElementById('agent-list'), empty: document.getElementById('agents-empty'),
+  refresh: document.getElementById('agents-refresh'), tpl: document.getElementById('agent-card-tpl'),
+  overlay: document.getElementById('agent-overlay'), close: document.getElementById('agent-close'),
+  mName: document.getElementById('agent-modal-name'), mCat: document.getElementById('agent-modal-cat'),
+  mDesc: document.getElementById('agent-modal-desc'), mTools: document.getElementById('agent-modal-tools'),
+  mBody: document.getElementById('agent-modal-body'), toolsLabel: document.getElementById('agent-tools-label'),
+  task: document.getElementById('dispatch-task'), cmd: document.getElementById('dispatch-cmd'),
+  copy: document.getElementById('copy-cmd'),
+};
+let allAgents = [];
+let currentAgent = null;
+
+async function loadAgents() {
+  try {
+    const data = await api('/agents');
+    allAgents = data.agents || [];
+    agentsLoaded = true;
+    ag.total.textContent = data.total ?? 0;
+    ag.cats.textContent = Object.keys(data.categories || {}).length;
+    ag.tools.textContent = data.withTools ?? 0;
+    const cur = ag.catFilter.value;
+    ag.catFilter.innerHTML = '<option value="">All categories</option>';
+    for (const c of Object.keys(data.categories || {}).sort()) {
+      const o = document.createElement('option');
+      o.value = c; o.textContent = `${c} (${data.categories[c]})`;
+      ag.catFilter.appendChild(o);
+    }
+    ag.catFilter.value = cur;
+    renderAgents();
+  } catch (err) {
+    toast('Agents load failed: ' + err.message, true);
+  }
+}
+
+function filteredAgents() {
+  const q = ag.search.value.trim().toLowerCase();
+  const cat = ag.catFilter.value;
+  return allAgents.filter(a =>
+    (!cat || a.category === cat) &&
+    (!q || a.name.toLowerCase().includes(q) || (a.description || '').toLowerCase().includes(q))
+  );
+}
+
+function renderAgents() {
+  const items = filteredAgents();
+  ag.shown.textContent = items.length;
+  ag.list.innerHTML = '';
+  ag.empty.hidden = items.length > 0;
+  const frag = document.createDocumentFragment();
+  for (const a of items) {
+    const node = ag.tpl.content.cloneNode(true);
+    node.querySelector('.card-key').textContent = a.name;
+    node.querySelector('.agent-cat').textContent = a.category;
+    node.querySelector('.agent-card-desc').textContent = a.description || 'No description.';
+    node.querySelector('.agent-tool-count').textContent = a.toolCount ? `${a.toolCount} tools` : 'inherits tools';
+    node.querySelector('.agent-card').addEventListener('click', () => openAgent(a.name));
+    frag.appendChild(node);
+  }
+  ag.list.appendChild(frag);
+}
+
+async function openAgent(name) {
+  try {
+    const a = await api('/agents/' + encodeURIComponent(name));
+    currentAgent = a;
+    ag.mName.textContent = a.name;
+    ag.mCat.textContent = a.category;
+    ag.mDesc.textContent = a.description || 'No description.';
+    ag.mTools.innerHTML = '';
+    if (a.tools && a.tools.length) {
+      for (const t of a.tools) {
+        const s = document.createElement('span'); s.className = 'tool-chip'; s.textContent = t;
+        ag.mTools.appendChild(s);
+      }
+      ag.toolsLabel.textContent = `Tools (${a.tools.length})`;
+    } else {
+      const s = document.createElement('span'); s.className = 'tool-chip none';
+      s.textContent = 'Inherits all tools'; ag.mTools.appendChild(s);
+      ag.toolsLabel.textContent = 'Tools';
+    }
+    ag.mBody.textContent = a.body || '(no body)';
+    ag.task.value = '';
+    updateDispatch();
+    ag.overlay.hidden = false;
+  } catch (err) {
+    toast('Failed to open agent: ' + err.message, true);
+  }
+}
+
+function updateDispatch() {
+  if (!currentAgent) return;
+  const task = ag.task.value.trim() || 'Describe the task here';
+  const esc = task.replace(/\\/g, '\\\\').replace(/"/g, '\\"');
+  ag.cmd.textContent = `Task("${currentAgent.name}", "${esc}", "${currentAgent.name}")`;
+}
+
+function closeAgent() { ag.overlay.hidden = true; currentAgent = null; }
+
+ag.search.addEventListener('input', debounce(renderAgents, 200));
+ag.catFilter.addEventListener('change', renderAgents);
+ag.refresh.addEventListener('click', () => { agentsLoaded = false; loadAgents(); });
+ag.task.addEventListener('input', updateDispatch);
+ag.close.addEventListener('click', closeAgent);
+ag.overlay.addEventListener('click', (e) => { if (e.target === ag.overlay) closeAgent(); });
+ag.copy.addEventListener('click', async () => {
+  try { await navigator.clipboard.writeText(ag.cmd.textContent); toast('Dispatch command copied'); }
+  catch (_) { toast('Copy failed — select the text manually', true); }
+});
+document.addEventListener('keydown', (e) => { if (e.key === 'Escape' && !ag.overlay.hidden) closeAgent(); });

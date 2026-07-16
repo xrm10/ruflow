@@ -476,6 +476,97 @@ app.get('/api/memory/stats', (req, res) => {
 });
 
 // ---------------------------------------------------------------------------
+// Agents catalog — parse .claude/agents/*.md frontmatter
+// ---------------------------------------------------------------------------
+
+const AGENTS_DIR = path.join(__dirname, '..', '.claude', 'agents');
+let agentsCache = null;
+
+function parseFrontmatter(md) {
+  if (!md.startsWith('---')) return null;
+  const end = md.indexOf('\n---', 3);
+  if (end < 0) return null;
+  const fmText = md.slice(3, end);
+  const body = md.slice(end + 4).replace(/^\s*\n/, '');
+  const fm = {};
+  let key = null, block = false, blockLines = [];
+  for (const line of fmText.split('\n')) {
+    const m = line.match(/^([A-Za-z_]+):\s?(.*)$/);
+    if (m && !/^\s/.test(line)) {
+      if (key && block) { fm[key] = blockLines.join(' ').trim(); block = false; blockLines = []; }
+      key = m[1];
+      if (m[2] === '|' || m[2] === '>' || m[2] === '') { block = true; blockLines = []; }
+      else { fm[key] = m[2]; }
+    } else if (block && line.trim()) {
+      blockLines.push(line.trim());
+    }
+  }
+  if (key && block) fm[key] = blockLines.join(' ').trim();
+  return { fm, body };
+}
+
+function cleanDescription(desc) {
+  return (desc || '')
+    .replace(/<example>[\s\S]*?<\/example>/gi, '')
+    .replace(/<commentary>[\s\S]*?<\/commentary>/gi, '')
+    .replace(/Examples?:.*$/i, '')
+    .replace(/\s+/g, ' ')
+    .trim();
+}
+
+function walkAgents(dir, category, acc) {
+  let entries;
+  try { entries = fs.readdirSync(dir, { withFileTypes: true }); } catch (_) { return; }
+  for (const entry of entries) {
+    const p = path.join(dir, entry.name);
+    if (entry.isDirectory()) {
+      walkAgents(p, entry.name, acc);
+    } else if (entry.name.endsWith('.md') && entry.name !== 'MIGRATION_SUMMARY.md') {
+      let parsed;
+      try { parsed = parseFrontmatter(fs.readFileSync(p, 'utf-8')); } catch (_) { continue; }
+      if (!parsed || !parsed.fm.name) continue;
+      const tools = (parsed.fm.tools || '').split(',').map(t => t.trim()).filter(Boolean);
+      acc.push({
+        name: parsed.fm.name,
+        category: category || 'general',
+        description: cleanDescription(parsed.fm.description),
+        tools,
+        toolCount: tools.length,
+        file: path.relative(AGENTS_DIR, p),
+      });
+    }
+  }
+}
+
+function loadAgents() {
+  if (agentsCache) return agentsCache;
+  const acc = [];
+  walkAgents(AGENTS_DIR, null, acc);
+  acc.sort((a, b) => a.name.localeCompare(b.name));
+  agentsCache = acc;
+  return acc;
+}
+
+app.get('/api/agents', (req, res) => {
+  const all = loadAgents();
+  const categories = {};
+  let withTools = 0;
+  for (const a of all) {
+    categories[a.category] = (categories[a.category] || 0) + 1;
+    if (a.toolCount > 0) withTools++;
+  }
+  res.json({ total: all.length, categories, withTools, agents: all });
+});
+
+app.get('/api/agents/:name', (req, res) => {
+  const agent = loadAgents().find(a => a.name === req.params.name);
+  if (!agent) return res.status(404).json({ error: 'agent not found' });
+  let body = '';
+  try { body = parseFrontmatter(fs.readFileSync(path.join(AGENTS_DIR, agent.file), 'utf-8')).body; } catch (_) {}
+  res.json({ ...agent, body: body.slice(0, 8000) });
+});
+
+// ---------------------------------------------------------------------------
 // HTTP + WebSocket server
 // ---------------------------------------------------------------------------
 
