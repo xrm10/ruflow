@@ -446,6 +446,35 @@ app.post('/api/memory', express.json(), (req, res) => {
   res.json({ entry: addMemory(key, value, tags || [], 'api') });
 });
 
+app.delete('/api/memory/:id', (req, res) => {
+  const { id } = req.params;
+  if (!id) return res.status(400).json({ error: 'id required' });
+  const before = loadMemoryStore().entries.length;
+  deleteMemory(id);
+  const after = loadMemoryStore().entries.length;
+  if (after === before) return res.status(404).json({ error: 'not found' });
+  res.json({ deleted: id });
+});
+
+app.get('/api/memory/stats', (req, res) => {
+  const entries = loadMemoryStore().entries || [];
+  const sources = {};
+  const tags = {};
+  let latest = null;
+  for (const e of entries) {
+    sources[e.source || 'unknown'] = (sources[e.source || 'unknown'] || 0) + 1;
+    for (const t of e.tags || []) tags[t] = (tags[t] || 0) + 1;
+    if (!latest || (e.updatedAt && e.updatedAt > latest)) latest = e.updatedAt;
+  }
+  res.json({
+    total: entries.length,
+    sources,
+    tags,
+    latest,
+    vectorDb: { available: fs.existsSync(path.join(WORK_DIR, 'data/memory/agentdb.sqlite')) || fs.existsSync(path.join(WORK_DIR, 'data/memory/ruflow.db')) },
+  });
+});
+
 // ---------------------------------------------------------------------------
 // HTTP + WebSocket server
 // ---------------------------------------------------------------------------

@@ -1,0 +1,12 @@
+{
+  "name": "ruflow-dashboard",
+  "version": "0.1.0",
+  "description": "Ruflo Command — smart control panel for memory, agents, and self-learning systems",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js"
+  },
+  "dependencies": {
+    "express": "^4.18.2"
+  }
+}

@@ -1,0 +1,133 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <meta name="description" content="Ruflo Command — smart control panel for long-term memory, agents, and self-learning systems" />
+  <meta name="theme-color" content="#0a0e14" />
+  <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>◎</text></svg>" />
+  <title>Ruflo Command</title>
+  <link rel="stylesheet" href="dashboard.css" />
+</head>
+<body>
+  <div id="app">
+    <!-- Nav rail -->
+    <aside id="rail">
+      <div class="rail-brand">
+        <span class="brand-mark">◎</span>
+        <span class="brand-text"><b>RUFLO</b><small>COMMAND</small></span>
+      </div>
+      <nav class="rail-nav">
+        <button class="rail-item active" data-view="memory">
+          <span class="rail-ico">🧠</span><span>Memory</span>
+        </button>
+        <button class="rail-item" data-view="agents" disabled title="Next building block">
+          <span class="rail-ico">🤖</span><span>Agents</span><span class="soon">soon</span>
+        </button>
+        <button class="rail-item" data-view="learning" disabled title="Next building block">
+          <span class="rail-ico">📈</span><span>Learning</span><span class="soon">soon</span>
+        </button>
+        <button class="rail-item" data-view="system" disabled title="Next building block">
+          <span class="rail-ico">⚙️</span><span>System</span><span class="soon">soon</span>
+        </button>
+      </nav>
+      <div class="rail-foot">
+        <span id="backend-dot" class="dot" title="Backend status"></span>
+        <span id="backend-label">connecting…</span>
+      </div>
+    </aside>
+
+    <!-- Main -->
+    <main id="main">
+      <header id="page-head">
+        <div>
+          <h1>Long-term Memory</h1>
+          <p class="subtitle">Persistent knowledge the assistant carries across every session.</p>
+        </div>
+        <button id="refresh-btn" class="ghost-btn" title="Refresh">↻ Refresh</button>
+      </header>
+
+      <!-- Stat tiles -->
+      <section id="stats" class="stat-row" aria-label="Memory statistics">
+        <div class="stat-tile"><div class="stat-val" id="stat-total">—</div><div class="stat-lbl">Memories</div></div>
+        <div class="stat-tile"><div class="stat-val" id="stat-sources">—</div><div class="stat-lbl">Sources</div></div>
+        <div class="stat-tile"><div class="stat-val" id="stat-tags">—</div><div class="stat-lbl">Tags</div></div>
+        <div class="stat-tile"><div class="stat-val" id="stat-vector">—</div><div class="stat-lbl">Vector DB</div></div>
+      </section>
+
+      <!-- Toolbar -->
+      <section id="toolbar">
+        <div class="search-wrap">
+          <span class="search-ico">🔍</span>
+          <input id="search" type="search" placeholder="Search memories by key, value, or tag…" aria-label="Search memories" />
+        </div>
+        <select id="source-filter" aria-label="Filter by source">
+          <option value="">All sources</option>
+        </select>
+        <button id="add-toggle" class="primary-btn">+ Add memory</button>
+      </section>
+
+      <!-- Add form -->
+      <form id="add-form" class="add-form" hidden>
+        <div class="field">
+          <label for="f-key">Key</label>
+          <input id="f-key" type="text" placeholder="A short, unique title (re-using a key updates it)" required />
+        </div>
+        <div class="field">
+          <label for="f-value">Value</label>
+          <textarea id="f-value" rows="4" placeholder="The knowledge to remember…" required></textarea>
+        </div>
+        <div class="field">
+          <label for="f-tags">Tags <span class="hint">comma-separated</span></label>
+          <input id="f-tags" type="text" placeholder="e.g. architecture, decision, api" />
+        </div>
+        <div class="form-actions">
+          <button type="button" id="add-cancel" class="ghost-btn">Cancel</button>
+          <button type="submit" class="primary-btn">Save memory</button>
+        </div>
+      </form>
+
+      <!-- List -->
+      <section id="mem-list" class="mem-grid" aria-live="polite"></section>
+      <div id="empty" class="empty" hidden>
+        <div class="empty-mark">🗒️</div>
+        <p id="empty-text">No memories yet.</p>
+      </div>
+    </main>
+  </div>
+
+  <!-- Toast -->
+  <div id="toast" class="toast" role="status" aria-live="polite"></div>
+
+  <!-- Confirm delete -->
+  <div id="confirm-overlay" class="overlay" hidden>
+    <div class="confirm" role="dialog" aria-modal="true" aria-labelledby="confirm-title">
+      <h3 id="confirm-title">Delete this memory?</h3>
+      <p id="confirm-key" class="confirm-key"></p>
+      <p class="confirm-note">This permanently removes it from long-term memory.</p>
+      <div class="form-actions">
+        <button id="confirm-cancel" class="ghost-btn">Cancel</button>
+        <button id="confirm-delete" class="danger-btn">Delete</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Card template -->
+  <template id="card-tpl">
+    <article class="mem-card">
+      <header class="card-head">
+        <h3 class="card-key"></h3>
+        <span class="card-source"></span>
+      </header>
+      <p class="card-value"></p>
+      <div class="card-tags"></div>
+      <footer class="card-foot">
+        <span class="card-time"></span>
+        <button class="card-del" aria-label="Delete memory">Delete</button>
+      </footer>
+    </article>
+  </template>
+
+  <script src="dashboard.js"></script>
+</body>
+</html>
