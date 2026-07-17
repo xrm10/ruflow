@@ -539,7 +539,10 @@ function scheduleReconnect() {
 }
 
 function connectWS() {
-  try { ws = new WebSocket('ws://' + location.hostname + ':3001'); }
+  // Same-origin: the dashboard server proxies the WebSocket through to
+  // ruflow-ui. Works locally and behind a single public URL (http→ws, https→wss).
+  const proto = location.protocol === 'https:' ? 'wss' : 'ws';
+  try { ws = new WebSocket(proto + '://' + location.host); }
   catch (_) { scheduleReconnect(); return; }
   ws.addEventListener('open', () => {
     setBackend(true);

@@ -1,15 +1,21 @@
 // ---------------------------------------------------------------------------
 // Ruflo Command — standalone dashboard app.
 //
-// Serves the dashboard UI and proxies /api/* to the ruflow-ui backend so the
-// memory store stays the single source of truth (no data duplication, no CORS).
+// Serves the dashboard UI and proxies both HTTP (/api/*) and the WebSocket
+// through to the ruflow-ui backend, so everything reaches the browser over a
+// single origin. This is what lets the dashboard be hosted behind one public
+// URL (a tunnel or reverse proxy) — the memory store stays the single source
+// of truth (no data duplication, no CORS).
 // ---------------------------------------------------------------------------
 
 const express = require('express');
+const http = require('http');
 const path = require('path');
+const WebSocket = require('ws');
 
 const PORT = process.env.DASHBOARD_PORT || 3002;
 const BACKEND = process.env.RUFLOW_UI_URL || 'http://localhost:3001';
+const BACKEND_WS = BACKEND.replace(/^http/, 'ws');
 const PUBLIC_DIR = path.join(__dirname, 'public');
 
 const app = express();
@@ -41,6 +47,24 @@ app.use('/api', async (req, res) => {
 
 app.use(express.static(PUBLIC_DIR));
 
-app.listen(PORT, () => {
-  console.log(`[ruflo-command] dashboard on :${PORT} → backend ${BACKEND}`);
+const server = http.createServer(app);
+
+// Proxy the WebSocket (browser ⇄ dashboard ⇄ ruflow-ui). Each browser socket
+// gets its own upstream socket to the backend; frames are piped both ways.
+const wss = new WebSocket.Server({ server });
+wss.on('connection', (client) => {
+  const upstream = new WebSocket(BACKEND_WS);
+  const queue = [];
+  let open = false;
+  upstream.on('open', () => { open = true; queue.forEach((m) => upstream.send(m)); queue.length = 0; });
+  upstream.on('message', (data) => { if (client.readyState === WebSocket.OPEN) client.send(data.toString()); });
+  upstream.on('close', () => { try { client.close(); } catch (_) {} });
+  upstream.on('error', () => { try { client.close(); } catch (_) {} });
+  client.on('message', (data) => { const m = data.toString(); if (open) upstream.send(m); else queue.push(m); });
+  client.on('close', () => { try { upstream.close(); } catch (_) {} });
+  client.on('error', () => { try { upstream.close(); } catch (_) {} });
+});
+
+server.listen(PORT, () => {
+  console.log(`[ruflo-command] dashboard on :${PORT} → backend ${BACKEND} (HTTP + WebSocket proxied)`);
 });
