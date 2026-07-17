@@ -200,6 +200,21 @@ document.addEventListener('keydown', (e) => { if (e.key === 'Escape') closeConfi
 refresh();
 setInterval(loadStats, 15000); // keep tiles + backend status fresh
 
+// ---------- auth / logout ----------
+(async () => {
+  try {
+    const s = await (await fetch('/auth/status')).json();
+    const btn = document.getElementById('logout-btn');
+    if (s && s.authEnabled && btn) {
+      btn.hidden = false;
+      btn.addEventListener('click', async () => {
+        try { await fetch('/auth/logout', { method: 'POST' }); } catch (_) {}
+        location.href = '/login';
+      });
+    }
+  } catch (_) {}
+})();
+
 // ===================================================================
 // View router
 // ===================================================================
@@ -539,7 +554,10 @@ function scheduleReconnect() {
 }
 
 function connectWS() {
-  try { ws = new WebSocket('ws://' + location.hostname + ':3001'); }
+  // Same-origin: the dashboard server proxies the WebSocket through to
+  // ruflow-ui. Works locally and behind a single public URL (http→ws, https→wss).
+  const proto = location.protocol === 'https:' ? 'wss' : 'ws';
+  try { ws = new WebSocket(proto + '://' + location.host); }
   catch (_) { scheduleReconnect(); return; }
   ws.addEventListener('open', () => {
     setBackend(true);
