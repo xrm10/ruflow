@@ -200,6 +200,21 @@ document.addEventListener('keydown', (e) => { if (e.key === 'Escape') closeConfi
 refresh();
 setInterval(loadStats, 15000); // keep tiles + backend status fresh
 
+// ---------- auth / logout ----------
+(async () => {
+  try {
+    const s = await (await fetch('/auth/status')).json();
+    const btn = document.getElementById('logout-btn');
+    if (s && s.authEnabled && btn) {
+      btn.hidden = false;
+      btn.addEventListener('click', async () => {
+        try { await fetch('/auth/logout', { method: 'POST' }); } catch (_) {}
+        location.href = '/login';
+      });
+    }
+  } catch (_) {}
+})();
+
 // ===================================================================
 // View router
 // ===================================================================

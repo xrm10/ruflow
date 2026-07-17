@@ -66,6 +66,27 @@ server {
 
 Then run `certbot --nginx -d dashboard.example.com` for HTTPS.
 
+## Authentication (set this before hosting)
+
+The dashboard has a built-in password gate covering the **whole** public
+surface — the UI, the `/api` proxy, and the WebSocket. Enable it by setting one
+env var:
+
+```bash
+DASHBOARD_PASSWORD='a-long-random-passphrase' ./scripts/start-dashboard.sh
+```
+
+- With `DASHBOARD_PASSWORD` set, visitors get a login page; a signed httpOnly
+  session cookie (7-day) is then required for everything. There's a **Sign out**
+  button in the dashboard footer.
+- **Unset ⇒ auth is OFF** (local-dev convenience). The server prints a loud
+  warning; do not expose it publicly in this state.
+- Optionally pin `DASHBOARD_SESSION_SECRET` to keep sessions valid across
+  restarts (otherwise a fresh secret each boot means everyone re-logs-in).
+
+Only `ruflow-dashboard` (`:3002`) enforces auth — keep `ruflow-ui` (`:3001`)
+internal (localhost / private network), as it has no auth of its own.
+
 ## Configuration
 
 | Env var | Default | Purpose |
@@ -73,11 +94,14 @@ Then run `certbot --nginx -d dashboard.example.com` for HTTPS.
 | `PORT` | `3001` | ruflow-ui backend port |
 | `DASHBOARD_PORT` | `3002` | dashboard port (the one you expose) |
 | `RUFLOW_UI_URL` | `http://localhost:3001` | where the dashboard finds the backend |
+| `DASHBOARD_PASSWORD` | *(unset)* | login password; unset disables auth |
+| `DASHBOARD_SESSION_SECRET` | *(random per boot)* | pin to persist sessions across restarts |
 
 ## Security note
 
-There is **no authentication** in front of the dashboard, and the backend can
-spawn agents and read/write the repo. Do not expose it on the open internet
-without putting an auth layer (reverse-proxy basic auth, an SSO proxy, or a
-private network / VPN) in front of it. A quick tunnel URL is unguessable but
-still public — share it deliberately and stop the tunnel when done.
+Set `DASHBOARD_PASSWORD` before exposing the dashboard — the backend can spawn
+agents and read/write the repo, so an open instance is remote code execution
+for anyone with the URL. Even with auth, prefer HTTPS (a tunnel gives you this
+automatically; on a VPS use the nginx + certbot setup above) so the password
+and session cookie aren't sent in the clear. A quick-tunnel URL is unguessable
+but still public — stop the tunnel when you're done.
