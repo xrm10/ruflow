@@ -258,9 +258,21 @@
         <textarea id="dispatch-task" rows="2" placeholder="Describe the task for this agent…"></textarea>
         <div class="dispatch-row">
           <code id="dispatch-cmd"></code>
+          <select id="dispatch-model" aria-label="Model">
+            <option value="sonnet">Sonnet</option>
+            <option value="haiku">Haiku</option>
+            <option value="opus">Opus</option>
+          </select>
+          <button id="run-agent" class="primary-btn">Run</button>
           <button id="copy-cmd" class="primary-btn">Copy</button>
         </div>
-        <p class="confirm-note">Paste into Claude Code (Task tool) or run via the CLI. Live in-dashboard execution is a later block.</p>
+        <p class="dispatch-note">Runs a real headless agent — first output can take ~30s.</p>
+        <pre id="dispatch-stream" class="dispatch-stream" hidden></pre>
+        <div class="dispatch-run-row">
+          <span id="dispatch-status"></span>
+          <button id="dispatch-cancel-btn" class="ghost-btn" hidden>Cancel</button>
+        </div>
+        <p class="confirm-note">Or copy the command to run in Claude Code (Task tool) or via the CLI.</p>
       </div>
 
       <details class="agent-body-wrap">

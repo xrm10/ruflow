@@ -62,6 +62,7 @@ function addMemory(key, value, tags = [], source = 'user') {
     store.entries.push(entry);
   }
   saveMemoryStore(store);
+  broadcast({ type: 'event', event: 'memory_changed' });
   return entry;
 }
 
@@ -79,6 +80,7 @@ function deleteMemory(id) {
   const store = loadMemoryStore();
   store.entries = store.entries.filter(e => e.id !== id);
   saveMemoryStore(store);
+  broadcast({ type: 'event', event: 'memory_changed' });
 }
 
 function listMemory(limit = 20) {
@@ -648,11 +650,11 @@ function getSkillsCount() {
   return skillsCountCache;
 }
 
-app.get('/api/system', (req, res) => {
+function buildSystemSnapshot() {
   const mem = process.memoryUsage();
   let dbSizeKb = 0, dbAvailable = false;
   try { const st = fs.statSync(AGENTDB_FILE); dbSizeKb = Math.round(st.size / 1024); dbAvailable = true; } catch (_) {}
-  res.json({
+  return {
     status: 'ok',
     version: '1.0.0',
     node: process.version,
@@ -667,7 +669,11 @@ app.get('/api/system', (req, res) => {
       skills: getSkillsCount(),
     },
     agentDb: { available: dbAvailable, sizeKb: dbSizeKb },
-  });
+  };
+}
+
+app.get('/api/system', (req, res) => {
+  res.json(buildSystemSnapshot());
 });
 
 // ---------------------------------------------------------------------------
@@ -807,6 +813,118 @@ function broadcastSessionUpdate() {
 }
 
 // ---------------------------------------------------------------------------
+// Agent dispatch — spawn a persona-loaded claude worker, stream output to one client
+// ---------------------------------------------------------------------------
+
+const dispatches = new Map(); // dispatchId -> child process
+
+// Extract human-readable assistant text from a parsed stream-json object and
+// forward it. Ignores system/hook/user noise.
+function forwardDispatchText(obj, dispatchId, dsend, state) {
+  // With --include-partial-messages, token deltas already reconstruct the full
+  // text, so the complete 'assistant' message and 'result' would duplicate it.
+  // Stream deltas live; fall back to the complete message/result only if no
+  // deltas were seen for this dispatch.
+  if (obj.type === 'stream_event' && obj.event?.type === 'content_block_delta' && obj.event.delta?.text) {
+    state.streamed = true;
+    dsend({ type: 'dispatch_output', dispatchId, text: obj.event.delta.text });
+  } else if (obj.type === 'assistant' && Array.isArray(obj.message?.content)) {
+    if (state.streamed) return;
+    for (const item of obj.message.content) {
+      if (item.type === 'text' && item.text) dsend({ type: 'dispatch_output', dispatchId, text: item.text });
+    }
+  } else if (obj.type === 'result' && typeof obj.result === 'string') {
+    if (state.streamed) return;
+    dsend({ type: 'dispatch_output', dispatchId, text: obj.result });
+  }
+}
+
+function runAgentDispatch(ws, msg) {
+  const dsend = (obj) => { if (ws.readyState === 1) ws.send(JSON.stringify(obj)); };
+  const dispatchId = msg.dispatchId || uuidv4();
+
+  const agent = loadAgents().find(a => a.name === msg.agent);
+  if (!agent) return dsend({ type: 'dispatch_error', dispatchId, error: 'unknown agent' });
+
+  if (typeof msg.task !== 'string' || !msg.task.trim() || msg.task.length > 4000) {
+    return dsend({ type: 'dispatch_error', dispatchId, error: 'invalid task' });
+  }
+
+  const model = ['sonnet', 'haiku', 'opus'].includes(msg.model) ? msg.model : 'sonnet';
+
+  let body = '';
+  try { body = parseFrontmatter(fs.readFileSync(path.join(AGENTS_DIR, agent.file), 'utf-8')).body; } catch (_) {}
+  const systemPrompt = `You are the "${agent.name}" agent. ${agent.description}\n\n${body.slice(0, 6000)}\n\nWork in the current repository. Be concise.`;
+
+  // Note: --dangerously-skip-permissions is refused when running as root (this
+  // container's user), so we omit it. Dispatched agents therefore run in the
+  // default (restricted) headless permission mode — fine for reasoning/analysis,
+  // limited for tool-heavy edits.
+  const args = [
+    '-p',
+    '--output-format', 'stream-json',
+    '--verbose',
+    '--include-partial-messages',
+    '--model', model,
+    '--append-system-prompt', systemPrompt,
+    msg.task,
+  ];
+
+  const env = { ...process.env, CLAUDE_ENTRYPOINT: 'worker' };
+  delete env.CLAUDE_SESSION_ID;
+  delete env.CLAUDE_PARENT_SESSION_ID;
+
+  const child = spawn('claude', args, {
+    stdio: ['ignore', 'pipe', 'pipe'],
+    env,
+    cwd: path.join(__dirname, '..'),
+  });
+
+  dispatches.set(dispatchId, child);
+  dsend({ type: 'dispatch_started', dispatchId, agent: agent.name });
+
+  // Safety: hard kill if still running after 5 minutes
+  const killTimer = setTimeout(() => {
+    try { child.kill('SIGKILL'); } catch (_) {}
+  }, 300000);
+
+  let stdoutBuffer = '';
+  let stderrOutput = '';
+  const dstate = { streamed: false };
+
+  child.stdout.on('data', (chunk) => {
+    stdoutBuffer += chunk.toString();
+    const lines = stdoutBuffer.split('\n');
+    stdoutBuffer = lines.pop() || '';
+    for (const line of lines) {
+      const trimmed = line.trim();
+      if (!trimmed) continue;
+      let obj;
+      try { obj = JSON.parse(trimmed); } catch (_) { continue; }
+      forwardDispatchText(obj, dispatchId, dsend, dstate);
+    }
+  });
+
+  child.stderr.on('data', (chunk) => { stderrOutput += chunk.toString(); });
+
+  child.on('error', (err) => {
+    clearTimeout(killTimer);
+    dispatches.delete(dispatchId);
+    dsend({ type: 'dispatch_error', dispatchId, error: err.message });
+  });
+
+  child.on('close', (code) => {
+    clearTimeout(killTimer);
+    if (stdoutBuffer.trim()) {
+      try { forwardDispatchText(JSON.parse(stdoutBuffer.trim()), dispatchId, dsend, dstate); } catch (_) {}
+    }
+    if (stderrOutput.trim()) console.error('[dispatch] stderr:', stderrOutput.trim());
+    dsend({ type: 'dispatch_done', dispatchId, code });
+    dispatches.delete(dispatchId);
+  });
+}
+
+// ---------------------------------------------------------------------------
 // WebSocket connection handler
 // ---------------------------------------------------------------------------
 
@@ -936,6 +1054,16 @@ wss.on('connection', (ws) => {
 
       case 'regenerate':
         return handleRegenerate(msg);
+
+      case 'dispatch':
+        runAgentDispatch(ws, msg);
+        break;
+
+      case 'dispatch_cancel': {
+        const c = dispatches.get(msg.dispatchId);
+        if (c) { try { c.kill('SIGTERM'); } catch (_) {} }
+        break;
+      }
 
       case 'chat':
         if (activeProcess) {
@@ -1658,6 +1786,9 @@ GRAPHIFY (use ONLY for code/architecture tasks — not for general chat):
     }, CANCEL_KILL_TIMEOUT);
   }
 });
+
+// Periodic system snapshot broadcast for live dashboard updates
+setInterval(() => broadcast({ type: 'event', event: 'system_tick', data: buildSystemSnapshot() }), 5000);
 
 // ---------------------------------------------------------------------------
 // Start

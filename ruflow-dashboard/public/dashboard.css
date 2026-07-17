@@ -111,7 +111,7 @@ body {
   border-radius: 10px; padding: 10px 12px 10px 34px; font-size: 13.5px; outline: none;
 }
 #search:focus { border-color: var(--accent-dim); }
-#source-filter, #category-filter {
+#source-filter, #category-filter, #dispatch-model {
   background: var(--panel); border: 1px solid var(--border); color: var(--text);
   border-radius: 10px; padding: 10px 12px; font-size: 13px; outline: none; cursor: pointer;
 }
@@ -244,13 +244,26 @@ button { font-family: inherit; }
   border-radius: 8px; padding: 9px 11px; font-size: 13px; font-family: inherit; resize: vertical; outline: none;
 }
 .dispatch-box textarea:focus { border-color: var(--accent-dim); }
-.dispatch-row { display: flex; gap: 8px; align-items: stretch; margin-top: 10px; }
+.dispatch-row { display: flex; gap: 8px; align-items: stretch; margin-top: 10px; flex-wrap: wrap; }
 .dispatch-row code {
-  flex: 1; background: var(--bg); border: 1px solid var(--border); border-radius: 8px;
+  flex: 1; min-width: 100%; background: var(--bg); border: 1px solid var(--border); border-radius: 8px;
   padding: 9px 11px; font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 12px;
   color: var(--accent); overflow-x: auto; white-space: nowrap; display: flex; align-items: center;
 }
-.dispatch-row .primary-btn { flex-shrink: 0; }
+.dispatch-row .primary-btn, .dispatch-row #dispatch-model { flex-shrink: 0; }
+.dispatch-row #dispatch-model { margin-right: auto; }
+
+.dispatch-note { color: var(--text-faint); font-size: 12px; margin: 8px 0 0; }
+.dispatch-stream {
+  margin: 10px 0 0; background: var(--bg); border: 1px solid var(--border); border-radius: 8px;
+  padding: 10px 11px; max-height: 240px; overflow-y: auto;
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 12px; line-height: 1.5;
+  color: var(--text-dim); white-space: pre-wrap; word-break: break-word;
+}
+.dispatch-run-row { display: flex; align-items: center; gap: 10px; margin-top: 8px; min-height: 22px; }
+#dispatch-status { font-size: 12px; color: var(--text-dim); }
+#dispatch-status.err { color: var(--danger); }
+.dispatch-run-row .ghost-btn { margin-left: auto; padding: 5px 12px; }
 
 .agent-body-wrap summary { cursor: pointer; color: var(--text-dim); font-size: 12.5px; padding: 6px 0; }
 .agent-body-wrap summary:hover { color: var(--text); }

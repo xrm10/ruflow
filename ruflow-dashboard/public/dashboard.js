@@ -240,6 +240,9 @@ const ag = {
   mBody: document.getElementById('agent-modal-body'), toolsLabel: document.getElementById('agent-tools-label'),
   task: document.getElementById('dispatch-task'), cmd: document.getElementById('dispatch-cmd'),
   copy: document.getElementById('copy-cmd'),
+  model: document.getElementById('dispatch-model'), run: document.getElementById('run-agent'),
+  stream: document.getElementById('dispatch-stream'), cancelBtn: document.getElementById('dispatch-cancel-btn'),
+  status: document.getElementById('dispatch-status'),
 };
 let allAgents = [];
 let currentAgent = null;
@@ -314,6 +317,7 @@ async function openAgent(name) {
     }
     ag.mBody.textContent = a.body || '(no body)';
     ag.task.value = '';
+    resetDispatchUI();
     updateDispatch();
     ag.overlay.hidden = false;
   } catch (err) {
@@ -479,26 +483,30 @@ function renderServices(ok) {
     </div>`).join('');
 }
 
+function renderSystem(d) {
+  sy.uptime.textContent = fmtUptime(d.uptime || 0);
+  sy.rss.textContent = mb(d.memory.rss);
+  sy.sessions.textContent = d.counts.sessions ?? 0;
+  sy.node.textContent = d.node || '—';
+  sy.agents.textContent = d.counts.agents ?? 0;
+  sy.skills.textContent = (d.counts.skills ?? 0).toLocaleString();
+  sy.memories.textContent = d.counts.memories ?? 0;
+  sy.db.textContent = d.agentDb && d.agentDb.available ? d.agentDb.sizeKb + ' KB' : 'off';
+  const pct = d.memory.heapTotal ? Math.round((d.memory.heapUsed / d.memory.heapTotal) * 100) : 0;
+  sy.heapFill.style.width = pct + '%';
+  sy.heapTxt.textContent = `${mb(d.memory.heapUsed)} / ${mb(d.memory.heapTotal)} (${pct}%)`;
+  sy.memRss.textContent = mb(d.memory.rss);
+  sy.memExt.textContent = mb(d.memory.external);
+  sy.pid.textContent = d.pid ?? '—';
+  sy.started.textContent = d.startedAt ? new Date(d.startedAt).toLocaleString() : '—';
+  renderServices(true);
+}
+
 async function loadSystem() {
   try {
     const d = await api('/system');
     setBackend(true);
-    sy.uptime.textContent = fmtUptime(d.uptime || 0);
-    sy.rss.textContent = mb(d.memory.rss);
-    sy.sessions.textContent = d.counts.sessions ?? 0;
-    sy.node.textContent = d.node || '—';
-    sy.agents.textContent = d.counts.agents ?? 0;
-    sy.skills.textContent = (d.counts.skills ?? 0).toLocaleString();
-    sy.memories.textContent = d.counts.memories ?? 0;
-    sy.db.textContent = d.agentDb && d.agentDb.available ? d.agentDb.sizeKb + ' KB' : 'off';
-    const pct = d.memory.heapTotal ? Math.round((d.memory.heapUsed / d.memory.heapTotal) * 100) : 0;
-    sy.heapFill.style.width = pct + '%';
-    sy.heapTxt.textContent = `${mb(d.memory.heapUsed)} / ${mb(d.memory.heapTotal)} (${pct}%)`;
-    sy.memRss.textContent = mb(d.memory.rss);
-    sy.memExt.textContent = mb(d.memory.external);
-    sy.pid.textContent = d.pid ?? '—';
-    sy.started.textContent = d.startedAt ? new Date(d.startedAt).toLocaleString() : '—';
-    renderServices(true);
+    renderSystem(d);
   } catch (err) {
     setBackend(false);
     renderServices(false);
@@ -509,3 +517,103 @@ async function loadSystem() {
 sy.refresh.addEventListener('click', loadSystem);
 // Live-tick while the System view is open
 setInterval(() => { if (activeView === 'system') loadSystem(); }, 5000);
+
+// ===================================================================
+// Live WebSocket — realtime events + agent dispatch streaming
+// ===================================================================
+let ws = null;              // active socket
+let wsReconnect = null;     // reconnect interval handle (single, non-stacking)
+let dispatchId = null;      // dispatch id shown in the open agent modal
+
+function wsSend(obj) {
+  if (ws && ws.readyState === WebSocket.OPEN) { ws.send(JSON.stringify(obj)); return true; }
+  return false;
+}
+
+function scheduleReconnect() {
+  if (wsReconnect) return; // already scheduled — don't stack
+  wsReconnect = setInterval(() => {
+    if (ws && (ws.readyState === WebSocket.OPEN || ws.readyState === WebSocket.CONNECTING)) return;
+    connectWS();
+  }, 3000);
+}
+
+function connectWS() {
+  try { ws = new WebSocket('ws://' + location.hostname + ':3001'); }
+  catch (_) { scheduleReconnect(); return; }
+  ws.addEventListener('open', () => {
+    setBackend(true);
+    if (wsReconnect) { clearInterval(wsReconnect); wsReconnect = null; }
+  });
+  ws.addEventListener('close', () => { setBackend(false); scheduleReconnect(); });
+  ws.addEventListener('error', () => { try { ws.close(); } catch (_) {} });
+  ws.addEventListener('message', (ev) => {
+    let msg; try { msg = JSON.parse(ev.data); } catch (_) { return; }
+    routeWS(msg);
+  });
+}
+
+function routeWS(msg) {
+  switch (msg && msg.type) {
+    case 'dispatch_started':
+      if (msg.dispatchId === dispatchId) setDispatchStatus('running…');
+      break;
+    case 'dispatch_output':
+      // Only append while the same dispatch's modal is open (leaves stale/backgrounded runs alone).
+      if (msg.dispatchId === dispatchId && !ag.overlay.hidden) appendStream(msg.text || '');
+      break;
+    case 'dispatch_error':
+      if (msg.dispatchId === dispatchId) { setDispatchStatus('⚠ ' + (msg.error || 'error'), true); endDispatch(); }
+      break;
+    case 'dispatch_done':
+      if (msg.dispatchId === dispatchId) { setDispatchStatus('✓ done (exit code ' + (msg.code ?? 0) + ')'); endDispatch(); }
+      break;
+    case 'event':
+      if (msg.event === 'memory_changed' && activeView === 'memory') refresh();
+      else if (msg.event === 'system_tick' && activeView === 'system' && msg.data) renderSystem(msg.data);
+      break;
+  }
+}
+
+// ---------- dispatch UI ----------
+function setDispatchStatus(text, isErr) {
+  ag.status.textContent = text || '';
+  ag.status.classList.toggle('err', !!isErr);
+}
+function appendStream(text) {
+  ag.stream.hidden = false;
+  ag.stream.textContent += text;
+  ag.stream.scrollTop = ag.stream.scrollHeight; // auto-scroll to bottom
+}
+function endDispatch() { ag.cancelBtn.hidden = true; }
+function resetDispatchUI() {
+  dispatchId = null;
+  ag.stream.hidden = true;
+  ag.stream.textContent = '';
+  ag.cancelBtn.hidden = true;
+  setDispatchStatus('');
+}
+
+function runDispatch() {
+  if (!currentAgent) return;
+  const task = ag.task.value.trim();
+  if (!task) { toast('Enter a task to dispatch first', true); return; }
+  if (!ws || ws.readyState !== WebSocket.OPEN) { toast('Live backend offline — use Copy instead', true); return; }
+  dispatchId = crypto.randomUUID();
+  ag.stream.hidden = false;
+  ag.stream.textContent = '';
+  ag.cancelBtn.hidden = false;
+  setDispatchStatus('running…');
+  wsSend({ type: 'dispatch', agent: currentAgent.name, task, model: ag.model.value, dispatchId });
+}
+
+function cancelDispatch() {
+  if (!dispatchId) return;
+  wsSend({ type: 'dispatch_cancel', dispatchId });
+  setDispatchStatus('cancelling…');
+}
+
+ag.run.addEventListener('click', runDispatch);
+ag.cancelBtn.addEventListener('click', cancelDispatch);
+
+connectWS();
