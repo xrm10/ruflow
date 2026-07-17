@@ -207,17 +207,21 @@ const views = {
   memory: document.getElementById('view-memory'),
   agents: document.getElementById('view-agents'),
   learning: document.getElementById('view-learning'),
+  system: document.getElementById('view-system'),
 };
 const railItems = document.querySelectorAll('.rail-item[data-view]');
 let agentsLoaded = false;
 let learningLoaded = false;
+let activeView = 'memory';
 
 function showView(name) {
   if (!views[name]) return;
+  activeView = name;
   for (const [k, v] of Object.entries(views)) v.hidden = (k !== name);
   railItems.forEach(b => b.classList.toggle('active', b.dataset.view === name));
   if (name === 'agents' && !agentsLoaded) loadAgents();
   if (name === 'learning' && !learningLoaded) loadLearning();
+  if (name === 'system') loadSystem();
 }
 railItems.forEach(b => b.addEventListener('click', () => { if (!b.disabled) showView(b.dataset.view); }));
 
@@ -436,3 +440,72 @@ async function loadLearning() {
 }
 
 lr.refresh.addEventListener('click', () => { learningLoaded = false; loadLearning(); });
+
+// ===================================================================
+// System
+// ===================================================================
+const sy = {
+  uptime: document.getElementById('sy-uptime'), rss: document.getElementById('sy-rss'),
+  sessions: document.getElementById('sy-sessions'), node: document.getElementById('sy-node'),
+  agents: document.getElementById('sy-agents'), skills: document.getElementById('sy-skills'),
+  memories: document.getElementById('sy-memories'), db: document.getElementById('sy-db'),
+  heapFill: document.getElementById('sy-heap-fill'), heapTxt: document.getElementById('sy-heap-txt'),
+  memRss: document.getElementById('sy-mem-rss'), memExt: document.getElementById('sy-mem-ext'),
+  pid: document.getElementById('sy-pid'), started: document.getElementById('sy-started'),
+  services: document.getElementById('sy-services'), refresh: document.getElementById('system-refresh'),
+};
+
+function mb(bytes) { return (bytes / 1048576).toFixed(1) + ' MB'; }
+function fmtUptime(s) {
+  s = Math.floor(s);
+  const d = Math.floor(s / 86400); s %= 86400;
+  const h = Math.floor(s / 3600); s %= 3600;
+  const m = Math.floor(s / 60); const sec = s % 60;
+  if (d) return `${d}d ${h}h`;
+  if (h) return `${h}h ${m}m`;
+  if (m) return `${m}m ${sec}s`;
+  return `${sec}s`;
+}
+
+function renderServices(ok) {
+  sy.services.innerHTML = [
+    { name: 'ruflow-ui backend', meta: ':3001 · memory + agents + learning API', up: ok },
+    { name: 'Ruflo Command (this app)', meta: ':3002 · dashboard + API proxy', up: true },
+  ].map(s => `<div class="sy-service">
+      <span class="dot ${s.up ? 'ok' : 'bad'}"></span>
+      <span class="sy-service-name">${s.name}</span>
+      <span class="sy-service-meta">${s.meta}</span>
+      <span class="sy-service-status ${s.up ? 'up' : 'down'}">${s.up ? 'online' : 'offline'}</span>
+    </div>`).join('');
+}
+
+async function loadSystem() {
+  try {
+    const d = await api('/system');
+    setBackend(true);
+    sy.uptime.textContent = fmtUptime(d.uptime || 0);
+    sy.rss.textContent = mb(d.memory.rss);
+    sy.sessions.textContent = d.counts.sessions ?? 0;
+    sy.node.textContent = d.node || '—';
+    sy.agents.textContent = d.counts.agents ?? 0;
+    sy.skills.textContent = (d.counts.skills ?? 0).toLocaleString();
+    sy.memories.textContent = d.counts.memories ?? 0;
+    sy.db.textContent = d.agentDb && d.agentDb.available ? d.agentDb.sizeKb + ' KB' : 'off';
+    const pct = d.memory.heapTotal ? Math.round((d.memory.heapUsed / d.memory.heapTotal) * 100) : 0;
+    sy.heapFill.style.width = pct + '%';
+    sy.heapTxt.textContent = `${mb(d.memory.heapUsed)} / ${mb(d.memory.heapTotal)} (${pct}%)`;
+    sy.memRss.textContent = mb(d.memory.rss);
+    sy.memExt.textContent = mb(d.memory.external);
+    sy.pid.textContent = d.pid ?? '—';
+    sy.started.textContent = d.startedAt ? new Date(d.startedAt).toLocaleString() : '—';
+    renderServices(true);
+  } catch (err) {
+    setBackend(false);
+    renderServices(false);
+    toast('System load failed: ' + err.message, true);
+  }
+}
+
+sy.refresh.addEventListener('click', loadSystem);
+// Live-tick while the System view is open
+setInterval(() => { if (activeView === 'system') loadSystem(); }, 5000);

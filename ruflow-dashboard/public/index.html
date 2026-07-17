@@ -27,8 +27,8 @@
         <button class="rail-item" data-view="learning">
           <span class="rail-ico">📈</span><span>Learning</span>
         </button>
-        <button class="rail-item" data-view="system" disabled title="Next building block">
-          <span class="rail-ico">⚙️</span><span>System</span><span class="soon">soon</span>
+        <button class="rail-item" data-view="system">
+          <span class="rail-ico">⚙️</span><span>System</span>
         </button>
       </nav>
       <div class="rail-foot">
@@ -168,6 +168,57 @@
 
         <div class="lr-substrate" id="lr-substrate"></div>
       </div><!-- /view-learning -->
+
+      <!-- System view -->
+      <div id="view-system" class="view" hidden>
+        <header class="page-head">
+          <div>
+            <h1>System</h1>
+            <p class="subtitle">Live runtime health and the inventory Ruflo Command draws on.</p>
+          </div>
+          <button id="system-refresh" class="ghost-btn" title="Refresh">↻ Refresh</button>
+        </header>
+
+        <section class="stat-row" aria-label="System health">
+          <div class="stat-tile"><div class="stat-val" id="sy-uptime">—</div><div class="stat-lbl">Uptime</div></div>
+          <div class="stat-tile"><div class="stat-val" id="sy-rss">—</div><div class="stat-lbl">Memory (RSS)</div></div>
+          <div class="stat-tile"><div class="stat-val" id="sy-sessions">—</div><div class="stat-lbl">Sessions</div></div>
+          <div class="stat-tile"><div class="stat-val" id="sy-node">—</div><div class="stat-lbl">Node</div></div>
+        </section>
+
+        <div class="sy-grid">
+          <section class="sy-block">
+            <h2 class="lr-h">🧩 Inventory</h2>
+            <div class="sy-inv">
+              <div class="sy-inv-item"><span class="sy-inv-val" id="sy-agents">—</span><span class="sy-inv-lbl">Agents</span></div>
+              <div class="sy-inv-item"><span class="sy-inv-val" id="sy-skills">—</span><span class="sy-inv-lbl">Skills</span></div>
+              <div class="sy-inv-item"><span class="sy-inv-val" id="sy-memories">—</span><span class="sy-inv-lbl">Memories</span></div>
+              <div class="sy-inv-item"><span class="sy-inv-val" id="sy-db">—</span><span class="sy-inv-lbl">AgentDB</span></div>
+            </div>
+          </section>
+
+          <section class="sy-block">
+            <h2 class="lr-h">📊 Runtime memory</h2>
+            <div class="sy-mem">
+              <div class="sy-mem-bar-wrap">
+                <div class="sy-mem-bar"><span class="sy-mem-fill" id="sy-heap-fill"></span></div>
+                <div class="sy-mem-legend"><span>Heap</span><span id="sy-heap-txt">—</span></div>
+              </div>
+              <div class="sy-mem-rows">
+                <div class="sy-mem-row"><span>RSS</span><span id="sy-mem-rss">—</span></div>
+                <div class="sy-mem-row"><span>External</span><span id="sy-mem-ext">—</span></div>
+                <div class="sy-mem-row"><span>PID</span><span id="sy-pid">—</span></div>
+                <div class="sy-mem-row"><span>Started</span><span id="sy-started">—</span></div>
+              </div>
+            </div>
+          </section>
+        </div>
+
+        <section class="sy-block">
+          <h2 class="lr-h">🔌 Services</h2>
+          <div id="sy-services" class="sy-services"></div>
+        </section>
+      </div><!-- /view-system -->
     </main>
   </div>
 

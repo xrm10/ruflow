@@ -300,7 +300,44 @@ button { font-family: inherit; }
 }
 .lr-substrate b { color: var(--text-dim); font-weight: 600; }
 
+/* ---------- System view ---------- */
+.sy-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; margin-bottom: 8px; }
+.sy-block {
+  background: var(--panel); border: 1px solid var(--border); border-radius: var(--radius);
+  padding: 16px 18px; margin-bottom: 16px;
+}
+.sy-block .lr-h { margin-top: 0; }
+.sy-inv { display: grid; grid-template-columns: repeat(2, 1fr); gap: 12px; }
+.sy-inv-item {
+  display: flex; flex-direction: column; gap: 2px; padding: 12px 14px;
+  background: var(--panel-2); border: 1px solid var(--border); border-radius: 10px;
+}
+.sy-inv-val { font-size: 22px; font-weight: 680; color: var(--text); }
+.sy-inv-lbl { font-size: 11px; text-transform: uppercase; letter-spacing: 1.2px; color: var(--text-faint); }
+
+.sy-mem-bar-wrap { margin-bottom: 14px; }
+.sy-mem-bar { height: 12px; background: var(--panel-2); border-radius: 6px; overflow: hidden; }
+.sy-mem-fill { display: block; height: 100%; background: var(--accent); border-radius: 6px; transition: width .4s ease; }
+.sy-mem-legend { display: flex; justify-content: space-between; font-size: 11px; color: var(--text-faint); margin-top: 6px; }
+.sy-mem-rows { display: flex; flex-direction: column; gap: 8px; }
+.sy-mem-row { display: flex; justify-content: space-between; font-size: 13px; }
+.sy-mem-row span:first-child { color: var(--text-dim); }
+.sy-mem-row span:last-child { color: var(--text); font-family: ui-monospace, Menlo, monospace; font-size: 12px; }
+
+.sy-services { display: flex; flex-direction: column; gap: 10px; }
+.sy-service {
+  display: flex; align-items: center; gap: 12px; padding: 11px 14px;
+  background: var(--panel-2); border: 1px solid var(--border); border-radius: 10px;
+}
+.sy-service .dot { flex-shrink: 0; }
+.sy-service-name { font-size: 13px; color: var(--text); font-weight: 600; }
+.sy-service-meta { font-size: 12px; color: var(--text-faint); font-family: ui-monospace, Menlo, monospace; }
+.sy-service-status { margin-left: auto; font-size: 11px; text-transform: uppercase; letter-spacing: 1px; }
+.sy-service-status.up { color: var(--accent); }
+.sy-service-status.down { color: var(--danger); }
+
 @media (max-width: 720px) {
+  .sy-grid { grid-template-columns: 1fr; }
   .lr-columns { grid-template-columns: 1fr; }
   .lr-skill-name { flex-basis: 130px; }
   #rail { width: 62px; }

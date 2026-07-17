@@ -635,6 +635,42 @@ app.get('/api/learning', async (req, res) => {
 });
 
 // ---------------------------------------------------------------------------
+// System — live runtime snapshot + inventory
+// ---------------------------------------------------------------------------
+
+let skillsCountCache = null;
+function getSkillsCount() {
+  if (skillsCountCache !== null) return skillsCountCache;
+  try {
+    const p = path.join(__dirname, '..', '.agents', 'skills', 'antigravity-awesome-skills', 'skills_index.json');
+    skillsCountCache = JSON.parse(fs.readFileSync(p, 'utf-8')).length;
+  } catch (_) { skillsCountCache = skillsIndex.length || 0; }
+  return skillsCountCache;
+}
+
+app.get('/api/system', (req, res) => {
+  const mem = process.memoryUsage();
+  let dbSizeKb = 0, dbAvailable = false;
+  try { const st = fs.statSync(AGENTDB_FILE); dbSizeKb = Math.round(st.size / 1024); dbAvailable = true; } catch (_) {}
+  res.json({
+    status: 'ok',
+    version: '1.0.0',
+    node: process.version,
+    pid: process.pid,
+    uptime: process.uptime(),
+    startedAt: new Date(Date.now() - process.uptime() * 1000).toISOString(),
+    memory: { rss: mem.rss, heapUsed: mem.heapUsed, heapTotal: mem.heapTotal, external: mem.external },
+    counts: {
+      sessions: listSessions().length,
+      agents: loadAgents().length,
+      memories: (loadMemoryStore().entries || []).length,
+      skills: getSkillsCount(),
+    },
+    agentDb: { available: dbAvailable, sizeKb: dbSizeKb },
+  });
+});
+
+// ---------------------------------------------------------------------------
 // HTTP + WebSocket server
 // ---------------------------------------------------------------------------
 
