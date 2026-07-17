@@ -62,6 +62,7 @@ function addMemory(key, value, tags = [], source = 'user') {
     store.entries.push(entry);
   }
   saveMemoryStore(store);
+  broadcast({ type: 'event', event: 'memory_changed' });
   return entry;
 }
 
@@ -79,6 +80,7 @@ function deleteMemory(id) {
   const store = loadMemoryStore();
   store.entries = store.entries.filter(e => e.id !== id);
   saveMemoryStore(store);
+  broadcast({ type: 'event', event: 'memory_changed' });
 }
 
 function listMemory(limit = 20) {
@@ -446,6 +448,234 @@ app.post('/api/memory', express.json(), (req, res) => {
   res.json({ entry: addMemory(key, value, tags || [], 'api') });
 });
 
+app.delete('/api/memory/:id', (req, res) => {
+  const { id } = req.params;
+  if (!id) return res.status(400).json({ error: 'id required' });
+  const before = loadMemoryStore().entries.length;
+  deleteMemory(id);
+  const after = loadMemoryStore().entries.length;
+  if (after === before) return res.status(404).json({ error: 'not found' });
+  res.json({ deleted: id });
+});
+
+app.get('/api/memory/stats', (req, res) => {
+  const entries = loadMemoryStore().entries || [];
+  const sources = {};
+  const tags = {};
+  let latest = null;
+  for (const e of entries) {
+    sources[e.source || 'unknown'] = (sources[e.source || 'unknown'] || 0) + 1;
+    for (const t of e.tags || []) tags[t] = (tags[t] || 0) + 1;
+    if (!latest || (e.updatedAt && e.updatedAt > latest)) latest = e.updatedAt;
+  }
+  res.json({
+    total: entries.length,
+    sources,
+    tags,
+    latest,
+    vectorDb: { available: fs.existsSync(path.join(WORK_DIR, 'data/memory/agentdb.sqlite')) || fs.existsSync(path.join(WORK_DIR, 'data/memory/ruflow.db')) },
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Agents catalog — parse .claude/agents/*.md frontmatter
+// ---------------------------------------------------------------------------
+
+const AGENTS_DIR = path.join(__dirname, '..', '.claude', 'agents');
+let agentsCache = null;
+
+function parseFrontmatter(md) {
+  if (!md.startsWith('---')) return null;
+  const end = md.indexOf('\n---', 3);
+  if (end < 0) return null;
+  const fmText = md.slice(3, end);
+  const body = md.slice(end + 4).replace(/^\s*\n/, '');
+  const fm = {};
+  let key = null, block = false, blockLines = [];
+  for (const line of fmText.split('\n')) {
+    const m = line.match(/^([A-Za-z_]+):\s?(.*)$/);
+    if (m && !/^\s/.test(line)) {
+      if (key && block) { fm[key] = blockLines.join(' ').trim(); block = false; blockLines = []; }
+      key = m[1];
+      if (m[2] === '|' || m[2] === '>' || m[2] === '') { block = true; blockLines = []; }
+      else { fm[key] = m[2]; }
+    } else if (block && line.trim()) {
+      blockLines.push(line.trim());
+    }
+  }
+  if (key && block) fm[key] = blockLines.join(' ').trim();
+  return { fm, body };
+}
+
+function cleanDescription(desc) {
+  return (desc || '')
+    .replace(/<example>[\s\S]*?<\/example>/gi, '')
+    .replace(/<commentary>[\s\S]*?<\/commentary>/gi, '')
+    .replace(/Examples?:.*$/i, '')
+    .replace(/\s+/g, ' ')
+    .trim();
+}
+
+function walkAgents(dir, category, acc) {
+  let entries;
+  try { entries = fs.readdirSync(dir, { withFileTypes: true }); } catch (_) { return; }
+  for (const entry of entries) {
+    const p = path.join(dir, entry.name);
+    if (entry.isDirectory()) {
+      walkAgents(p, entry.name, acc);
+    } else if (entry.name.endsWith('.md') && entry.name !== 'MIGRATION_SUMMARY.md') {
+      let parsed;
+      try { parsed = parseFrontmatter(fs.readFileSync(p, 'utf-8')); } catch (_) { continue; }
+      if (!parsed || !parsed.fm.name) continue;
+      const tools = (parsed.fm.tools || '').split(',').map(t => t.trim()).filter(Boolean);
+      acc.push({
+        name: parsed.fm.name,
+        category: category || 'general',
+        description: cleanDescription(parsed.fm.description),
+        tools,
+        toolCount: tools.length,
+        file: path.relative(AGENTS_DIR, p),
+      });
+    }
+  }
+}
+
+function loadAgents() {
+  if (agentsCache) return agentsCache;
+  const acc = [];
+  walkAgents(AGENTS_DIR, null, acc);
+  acc.sort((a, b) => a.name.localeCompare(b.name));
+  agentsCache = acc;
+  return acc;
+}
+
+app.get('/api/agents', (req, res) => {
+  const all = loadAgents();
+  const categories = {};
+  let withTools = 0;
+  for (const a of all) {
+    categories[a.category] = (categories[a.category] || 0) + 1;
+    if (a.toolCount > 0) withTools++;
+  }
+  res.json({ total: all.length, categories, withTools, agents: all });
+});
+
+app.get('/api/agents/:name', (req, res) => {
+  const agent = loadAgents().find(a => a.name === req.params.name);
+  if (!agent) return res.status(404).json({ error: 'agent not found' });
+  let body = '';
+  try { body = parseFrontmatter(fs.readFileSync(path.join(AGENTS_DIR, agent.file), 'utf-8')).body; } catch (_) {}
+  res.json({ ...agent, body: body.slice(0, 8000) });
+});
+
+// ---------------------------------------------------------------------------
+// Learning — surface the self-learning ledger from the AgentDB (ruflow.db)
+// ---------------------------------------------------------------------------
+
+const AGENTDB_FILE = path.join(__dirname, '..', 'data', 'memory', 'ruflow.db');
+const RANKED_FILE = path.join(__dirname, '..', '.claude-flow', 'data', 'ranked-context.json');
+let sqlJsPromise = null;
+
+function getSqlJs() {
+  if (!sqlJsPromise) {
+    try { sqlJsPromise = require('sql.js')(); }
+    catch (_) { sqlJsPromise = Promise.resolve(null); }
+  }
+  return sqlJsPromise;
+}
+
+async function openLearningDb() {
+  const SQL = await getSqlJs();
+  if (!SQL || !fs.existsSync(AGENTDB_FILE)) return null;
+  try { return new SQL.Database(fs.readFileSync(AGENTDB_FILE)); } catch (_) { return null; }
+}
+
+function dbRows(db, sql) {
+  try {
+    const r = db.exec(sql);
+    if (!r[0]) return [];
+    const cols = r[0].columns;
+    return r[0].values.map(v => Object.fromEntries(v.map((x, i) => [cols[i], x])));
+  } catch (_) { return []; }
+}
+
+function memoryLearningStats() {
+  const entries = loadMemoryStore().entries || [];
+  let auto = 0;
+  for (const e of entries) if (e.source === 'auto') auto++;
+  return { total: entries.length, autoCaptured: auto };
+}
+
+function readRanked() {
+  try {
+    const j = JSON.parse(fs.readFileSync(RANKED_FILE, 'utf-8'));
+    return { entries: (j.entries || []).length, computedAt: j.computedAt || null };
+  } catch (_) { return { entries: 0, computedAt: null }; }
+}
+
+app.get('/api/learning', async (req, res) => {
+  const ranked = readRanked();
+  const memoryStore = memoryLearningStats();
+  const db = await openLearningDb();
+  if (!db) {
+    return res.json({ available: false, reason: 'AgentDB (sql.js) not available in this environment', ranked, memoryStore });
+  }
+  const count = (t) => { const r = dbRows(db, `SELECT COUNT(*) AS c FROM ${t}`); return r[0] ? r[0].c : 0; };
+  const stats = {
+    sessions: count('sessions'), learnings: count('learnings'), skillsUsed: count('skills_used'),
+    errors: count('errors'), knowledge: count('knowledge'), tasks: count('tasks'),
+  };
+  const learnings = dbRows(db, "SELECT category, content, importance, tags, created_at FROM learnings ORDER BY created_at DESC LIMIT 25");
+  const errors = dbRows(db, "SELECT error_type, error_message, fix_applied, file_path, created_at FROM errors ORDER BY created_at DESC LIMIT 25");
+  const skills = dbRows(db, "SELECT skill_name, COUNT(*) AS uses, SUM(success) AS successes FROM skills_used GROUP BY skill_name ORDER BY uses DESC LIMIT 25");
+  const knowledge = dbRows(db, "SELECT category, key, value, updated_at FROM knowledge ORDER BY updated_at DESC LIMIT 25");
+  const sessions = dbRows(db, "SELECT id, summary, model, total_tasks, total_edits, total_errors, started_at FROM sessions ORDER BY started_at DESC LIMIT 10");
+  db.close();
+  let dbSizeKb = 0;
+  try { dbSizeKb = Math.round(fs.statSync(AGENTDB_FILE).size / 1024); } catch (_) {}
+  res.json({ available: true, dbSizeKb, stats, learnings, errors, skills, knowledge, sessions, ranked, memoryStore });
+});
+
+// ---------------------------------------------------------------------------
+// System — live runtime snapshot + inventory
+// ---------------------------------------------------------------------------
+
+let skillsCountCache = null;
+function getSkillsCount() {
+  if (skillsCountCache !== null) return skillsCountCache;
+  try {
+    const p = path.join(__dirname, '..', '.agents', 'skills', 'antigravity-awesome-skills', 'skills_index.json');
+    skillsCountCache = JSON.parse(fs.readFileSync(p, 'utf-8')).length;
+  } catch (_) { skillsCountCache = skillsIndex.length || 0; }
+  return skillsCountCache;
+}
+
+function buildSystemSnapshot() {
+  const mem = process.memoryUsage();
+  let dbSizeKb = 0, dbAvailable = false;
+  try { const st = fs.statSync(AGENTDB_FILE); dbSizeKb = Math.round(st.size / 1024); dbAvailable = true; } catch (_) {}
+  return {
+    status: 'ok',
+    version: '1.0.0',
+    node: process.version,
+    pid: process.pid,
+    uptime: process.uptime(),
+    startedAt: new Date(Date.now() - process.uptime() * 1000).toISOString(),
+    memory: { rss: mem.rss, heapUsed: mem.heapUsed, heapTotal: mem.heapTotal, external: mem.external },
+    counts: {
+      sessions: listSessions().length,
+      agents: loadAgents().length,
+      memories: (loadMemoryStore().entries || []).length,
+      skills: getSkillsCount(),
+    },
+    agentDb: { available: dbAvailable, sizeKb: dbSizeKb },
+  };
+}
+
+app.get('/api/system', (req, res) => {
+  res.json(buildSystemSnapshot());
+});
+
 // ---------------------------------------------------------------------------
 // HTTP + WebSocket server
 // ---------------------------------------------------------------------------
@@ -583,6 +813,118 @@ function broadcastSessionUpdate() {
 }
 
 // ---------------------------------------------------------------------------
+// Agent dispatch — spawn a persona-loaded claude worker, stream output to one client
+// ---------------------------------------------------------------------------
+
+const dispatches = new Map(); // dispatchId -> child process
+
+// Extract human-readable assistant text from a parsed stream-json object and
+// forward it. Ignores system/hook/user noise.
+function forwardDispatchText(obj, dispatchId, dsend, state) {
+  // With --include-partial-messages, token deltas already reconstruct the full
+  // text, so the complete 'assistant' message and 'result' would duplicate it.
+  // Stream deltas live; fall back to the complete message/result only if no
+  // deltas were seen for this dispatch.
+  if (obj.type === 'stream_event' && obj.event?.type === 'content_block_delta' && obj.event.delta?.text) {
+    state.streamed = true;
+    dsend({ type: 'dispatch_output', dispatchId, text: obj.event.delta.text });
+  } else if (obj.type === 'assistant' && Array.isArray(obj.message?.content)) {
+    if (state.streamed) return;
+    for (const item of obj.message.content) {
+      if (item.type === 'text' && item.text) dsend({ type: 'dispatch_output', dispatchId, text: item.text });
+    }
+  } else if (obj.type === 'result' && typeof obj.result === 'string') {
+    if (state.streamed) return;
+    dsend({ type: 'dispatch_output', dispatchId, text: obj.result });
+  }
+}
+
+function runAgentDispatch(ws, msg) {
+  const dsend = (obj) => { if (ws.readyState === 1) ws.send(JSON.stringify(obj)); };
+  const dispatchId = msg.dispatchId || uuidv4();
+
+  const agent = loadAgents().find(a => a.name === msg.agent);
+  if (!agent) return dsend({ type: 'dispatch_error', dispatchId, error: 'unknown agent' });
+
+  if (typeof msg.task !== 'string' || !msg.task.trim() || msg.task.length > 4000) {
+    return dsend({ type: 'dispatch_error', dispatchId, error: 'invalid task' });
+  }
+
+  const model = ['sonnet', 'haiku', 'opus'].includes(msg.model) ? msg.model : 'sonnet';
+
+  let body = '';
+  try { body = parseFrontmatter(fs.readFileSync(path.join(AGENTS_DIR, agent.file), 'utf-8')).body; } catch (_) {}
+  const systemPrompt = `You are the "${agent.name}" agent. ${agent.description}\n\n${body.slice(0, 6000)}\n\nWork in the current repository. Be concise.`;
+
+  // Note: --dangerously-skip-permissions is refused when running as root (this
+  // container's user), so we omit it. Dispatched agents therefore run in the
+  // default (restricted) headless permission mode — fine for reasoning/analysis,
+  // limited for tool-heavy edits.
+  const args = [
+    '-p',
+    '--output-format', 'stream-json',
+    '--verbose',
+    '--include-partial-messages',
+    '--model', model,
+    '--append-system-prompt', systemPrompt,
+    msg.task,
+  ];
+
+  const env = { ...process.env, CLAUDE_ENTRYPOINT: 'worker' };
+  delete env.CLAUDE_SESSION_ID;
+  delete env.CLAUDE_PARENT_SESSION_ID;
+
+  const child = spawn('claude', args, {
+    stdio: ['ignore', 'pipe', 'pipe'],
+    env,
+    cwd: path.join(__dirname, '..'),
+  });
+
+  dispatches.set(dispatchId, child);
+  dsend({ type: 'dispatch_started', dispatchId, agent: agent.name });
+
+  // Safety: hard kill if still running after 5 minutes
+  const killTimer = setTimeout(() => {
+    try { child.kill('SIGKILL'); } catch (_) {}
+  }, 300000);
+
+  let stdoutBuffer = '';
+  let stderrOutput = '';
+  const dstate = { streamed: false };
+
+  child.stdout.on('data', (chunk) => {
+    stdoutBuffer += chunk.toString();
+    const lines = stdoutBuffer.split('\n');
+    stdoutBuffer = lines.pop() || '';
+    for (const line of lines) {
+      const trimmed = line.trim();
+      if (!trimmed) continue;
+      let obj;
+      try { obj = JSON.parse(trimmed); } catch (_) { continue; }
+      forwardDispatchText(obj, dispatchId, dsend, dstate);
+    }
+  });
+
+  child.stderr.on('data', (chunk) => { stderrOutput += chunk.toString(); });
+
+  child.on('error', (err) => {
+    clearTimeout(killTimer);
+    dispatches.delete(dispatchId);
+    dsend({ type: 'dispatch_error', dispatchId, error: err.message });
+  });
+
+  child.on('close', (code) => {
+    clearTimeout(killTimer);
+    if (stdoutBuffer.trim()) {
+      try { forwardDispatchText(JSON.parse(stdoutBuffer.trim()), dispatchId, dsend, dstate); } catch (_) {}
+    }
+    if (stderrOutput.trim()) console.error('[dispatch] stderr:', stderrOutput.trim());
+    dsend({ type: 'dispatch_done', dispatchId, code });
+    dispatches.delete(dispatchId);
+  });
+}
+
+// ---------------------------------------------------------------------------
 // WebSocket connection handler
 // ---------------------------------------------------------------------------
 
@@ -712,6 +1054,16 @@ wss.on('connection', (ws) => {
 
       case 'regenerate':
         return handleRegenerate(msg);
+
+      case 'dispatch':
+        runAgentDispatch(ws, msg);
+        break;
+
+      case 'dispatch_cancel': {
+        const c = dispatches.get(msg.dispatchId);
+        if (c) { try { c.kill('SIGTERM'); } catch (_) {} }
+        break;
+      }
 
       case 'chat':
         if (activeProcess) {
@@ -1434,6 +1786,9 @@ GRAPHIFY (use ONLY for code/architecture tasks — not for general chat):
     }, CANCEL_KILL_TIMEOUT);
   }
 });
+
+// Periodic system snapshot broadcast for live dashboard updates
+setInterval(() => broadcast({ type: 'event', event: 'system_tick', data: buildSystemSnapshot() }), 5000);
 
 // ---------------------------------------------------------------------------
 // Start

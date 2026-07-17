@@ -1,0 +1,318 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <meta name="description" content="Ruflo Command — smart control panel for long-term memory, agents, and self-learning systems" />
+  <meta name="theme-color" content="#0a0e14" />
+  <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>◎</text></svg>" />
+  <title>Ruflo Command</title>
+  <link rel="stylesheet" href="dashboard.css" />
+</head>
+<body>
+  <div id="app">
+    <!-- Nav rail -->
+    <aside id="rail">
+      <div class="rail-brand">
+        <span class="brand-mark">◎</span>
+        <span class="brand-text"><b>RUFLO</b><small>COMMAND</small></span>
+      </div>
+      <nav class="rail-nav">
+        <button class="rail-item active" data-view="memory">
+          <span class="rail-ico">🧠</span><span>Memory</span>
+        </button>
+        <button class="rail-item" data-view="agents">
+          <span class="rail-ico">🤖</span><span>Agents</span>
+        </button>
+        <button class="rail-item" data-view="learning">
+          <span class="rail-ico">📈</span><span>Learning</span>
+        </button>
+        <button class="rail-item" data-view="system">
+          <span class="rail-ico">⚙️</span><span>System</span>
+        </button>
+      </nav>
+      <div class="rail-foot">
+        <span id="backend-dot" class="dot" title="Backend status"></span>
+        <span id="backend-label">connecting…</span>
+      </div>
+    </aside>
+
+    <!-- Main -->
+    <main id="main">
+      <!-- Memory view -->
+      <div id="view-memory" class="view">
+      <header class="page-head">
+        <div>
+          <h1>Long-term Memory</h1>
+          <p class="subtitle">Persistent knowledge the assistant carries across every session.</p>
+        </div>
+        <button id="refresh-btn" class="ghost-btn" title="Refresh">↻ Refresh</button>
+      </header>
+
+      <!-- Stat tiles -->
+      <section id="stats" class="stat-row" aria-label="Memory statistics">
+        <div class="stat-tile"><div class="stat-val" id="stat-total">—</div><div class="stat-lbl">Memories</div></div>
+        <div class="stat-tile"><div class="stat-val" id="stat-sources">—</div><div class="stat-lbl">Sources</div></div>
+        <div class="stat-tile"><div class="stat-val" id="stat-tags">—</div><div class="stat-lbl">Tags</div></div>
+        <div class="stat-tile"><div class="stat-val" id="stat-vector">—</div><div class="stat-lbl">Vector DB</div></div>
+      </section>
+
+      <!-- Toolbar -->
+      <section id="toolbar">
+        <div class="search-wrap">
+          <span class="search-ico">🔍</span>
+          <input id="search" type="search" placeholder="Search memories by key, value, or tag…" aria-label="Search memories" />
+        </div>
+        <select id="source-filter" aria-label="Filter by source">
+          <option value="">All sources</option>
+        </select>
+        <button id="add-toggle" class="primary-btn">+ Add memory</button>
+      </section>
+
+      <!-- Add form -->
+      <form id="add-form" class="add-form" hidden>
+        <div class="field">
+          <label for="f-key">Key</label>
+          <input id="f-key" type="text" placeholder="A short, unique title (re-using a key updates it)" required />
+        </div>
+        <div class="field">
+          <label for="f-value">Value</label>
+          <textarea id="f-value" rows="4" placeholder="The knowledge to remember…" required></textarea>
+        </div>
+        <div class="field">
+          <label for="f-tags">Tags <span class="hint">comma-separated</span></label>
+          <input id="f-tags" type="text" placeholder="e.g. architecture, decision, api" />
+        </div>
+        <div class="form-actions">
+          <button type="button" id="add-cancel" class="ghost-btn">Cancel</button>
+          <button type="submit" class="primary-btn">Save memory</button>
+        </div>
+      </form>
+
+      <!-- List -->
+      <section id="mem-list" class="mem-grid" aria-live="polite"></section>
+      <div id="empty" class="empty" hidden>
+        <div class="empty-mark">🗒️</div>
+        <p id="empty-text">No memories yet.</p>
+      </div>
+      </div><!-- /view-memory -->
+
+      <!-- Agents view -->
+      <div id="view-agents" class="view" hidden>
+        <header class="page-head">
+          <div>
+            <h1>Agents</h1>
+            <p class="subtitle">Specialized agents you can dispatch to coding, analysis, and ops tasks.</p>
+          </div>
+          <button id="agents-refresh" class="ghost-btn" title="Refresh">↻ Refresh</button>
+        </header>
+
+        <section class="stat-row" aria-label="Agent statistics">
+          <div class="stat-tile"><div class="stat-val" id="ag-total">—</div><div class="stat-lbl">Agents</div></div>
+          <div class="stat-tile"><div class="stat-val" id="ag-cats">—</div><div class="stat-lbl">Categories</div></div>
+          <div class="stat-tile"><div class="stat-val" id="ag-tools">—</div><div class="stat-lbl">Tool-enabled</div></div>
+          <div class="stat-tile"><div class="stat-val" id="ag-shown">—</div><div class="stat-lbl">Showing</div></div>
+        </section>
+
+        <section id="agents-toolbar">
+          <div class="search-wrap">
+            <span class="search-ico">🔍</span>
+            <input id="agent-search" type="search" placeholder="Search agents by name or description…" aria-label="Search agents" />
+          </div>
+          <select id="category-filter" aria-label="Filter by category">
+            <option value="">All categories</option>
+          </select>
+        </section>
+
+        <section id="agent-list" class="mem-grid" aria-live="polite"></section>
+        <div id="agents-empty" class="empty" hidden>
+          <div class="empty-mark">🤖</div>
+          <p>No agents match your filters.</p>
+        </div>
+      </div><!-- /view-agents -->
+
+      <!-- Learning view -->
+      <div id="view-learning" class="view" hidden>
+        <header class="page-head">
+          <div>
+            <h1>Learning</h1>
+            <p class="subtitle">What the system has picked up across sessions — lessons, fixed mistakes, and skills applied.</p>
+          </div>
+          <button id="learning-refresh" class="ghost-btn" title="Refresh">↻ Refresh</button>
+        </header>
+
+        <section class="stat-row" aria-label="Learning statistics">
+          <div class="stat-tile"><div class="stat-val" id="lr-learnings">—</div><div class="stat-lbl">Lessons learned</div></div>
+          <div class="stat-tile"><div class="stat-val" id="lr-skills">—</div><div class="stat-lbl">Skills applied</div></div>
+          <div class="stat-tile"><div class="stat-val" id="lr-errors">—</div><div class="stat-lbl">Mistakes logged</div></div>
+          <div class="stat-tile"><div class="stat-val" id="lr-sessions">—</div><div class="stat-lbl">Sessions</div></div>
+        </section>
+
+        <div id="lr-notice" class="lr-notice" hidden></div>
+
+        <div class="lr-columns">
+          <section class="lr-col">
+            <h2 class="lr-h">🎓 Lessons learned</h2>
+            <div id="lr-learnings-list" class="lr-list"></div>
+          </section>
+          <section class="lr-col">
+            <h2 class="lr-h">🔧 Mistakes → fixes</h2>
+            <div id="lr-errors-list" class="lr-list"></div>
+          </section>
+        </div>
+
+        <section class="lr-skills-block">
+          <h2 class="lr-h">⚡ Skills applied</h2>
+          <div id="lr-skills-list" class="lr-skills"></div>
+        </section>
+
+        <div class="lr-substrate" id="lr-substrate"></div>
+      </div><!-- /view-learning -->
+
+      <!-- System view -->
+      <div id="view-system" class="view" hidden>
+        <header class="page-head">
+          <div>
+            <h1>System</h1>
+            <p class="subtitle">Live runtime health and the inventory Ruflo Command draws on.</p>
+          </div>
+          <button id="system-refresh" class="ghost-btn" title="Refresh">↻ Refresh</button>
+        </header>
+
+        <section class="stat-row" aria-label="System health">
+          <div class="stat-tile"><div class="stat-val" id="sy-uptime">—</div><div class="stat-lbl">Uptime</div></div>
+          <div class="stat-tile"><div class="stat-val" id="sy-rss">—</div><div class="stat-lbl">Memory (RSS)</div></div>
+          <div class="stat-tile"><div class="stat-val" id="sy-sessions">—</div><div class="stat-lbl">Sessions</div></div>
+          <div class="stat-tile"><div class="stat-val" id="sy-node">—</div><div class="stat-lbl">Node</div></div>
+        </section>
+
+        <div class="sy-grid">
+          <section class="sy-block">
+            <h2 class="lr-h">🧩 Inventory</h2>
+            <div class="sy-inv">
+              <div class="sy-inv-item"><span class="sy-inv-val" id="sy-agents">—</span><span class="sy-inv-lbl">Agents</span></div>
+              <div class="sy-inv-item"><span class="sy-inv-val" id="sy-skills">—</span><span class="sy-inv-lbl">Skills</span></div>
+              <div class="sy-inv-item"><span class="sy-inv-val" id="sy-memories">—</span><span class="sy-inv-lbl">Memories</span></div>
+              <div class="sy-inv-item"><span class="sy-inv-val" id="sy-db">—</span><span class="sy-inv-lbl">AgentDB</span></div>
+            </div>
+          </section>
+
+          <section class="sy-block">
+            <h2 class="lr-h">📊 Runtime memory</h2>
+            <div class="sy-mem">
+              <div class="sy-mem-bar-wrap">
+                <div class="sy-mem-bar"><span class="sy-mem-fill" id="sy-heap-fill"></span></div>
+                <div class="sy-mem-legend"><span>Heap</span><span id="sy-heap-txt">—</span></div>
+              </div>
+              <div class="sy-mem-rows">
+                <div class="sy-mem-row"><span>RSS</span><span id="sy-mem-rss">—</span></div>
+                <div class="sy-mem-row"><span>External</span><span id="sy-mem-ext">—</span></div>
+                <div class="sy-mem-row"><span>PID</span><span id="sy-pid">—</span></div>
+                <div class="sy-mem-row"><span>Started</span><span id="sy-started">—</span></div>
+              </div>
+            </div>
+          </section>
+        </div>
+
+        <section class="sy-block">
+          <h2 class="lr-h">🔌 Services</h2>
+          <div id="sy-services" class="sy-services"></div>
+        </section>
+      </div><!-- /view-system -->
+    </main>
+  </div>
+
+  <!-- Toast -->
+  <div id="toast" class="toast" role="status" aria-live="polite"></div>
+
+  <!-- Confirm delete -->
+  <div id="confirm-overlay" class="overlay" hidden>
+    <div class="confirm" role="dialog" aria-modal="true" aria-labelledby="confirm-title">
+      <h3 id="confirm-title">Delete this memory?</h3>
+      <p id="confirm-key" class="confirm-key"></p>
+      <p class="confirm-note">This permanently removes it from long-term memory.</p>
+      <div class="form-actions">
+        <button id="confirm-cancel" class="ghost-btn">Cancel</button>
+        <button id="confirm-delete" class="danger-btn">Delete</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Agent detail modal -->
+  <div id="agent-overlay" class="overlay" hidden>
+    <div class="agent-modal" role="dialog" aria-modal="true" aria-labelledby="agent-modal-name">
+      <button id="agent-close" class="modal-close" aria-label="Close">&times;</button>
+      <div class="agent-modal-head">
+        <h2 id="agent-modal-name"></h2>
+        <span id="agent-modal-cat" class="card-source"></span>
+      </div>
+      <p id="agent-modal-desc" class="agent-desc"></p>
+
+      <div class="agent-tools-block">
+        <div class="block-label" id="agent-tools-label">Tools</div>
+        <div id="agent-modal-tools" class="agent-tools"></div>
+      </div>
+
+      <div class="dispatch-box">
+        <label for="dispatch-task">Dispatch to a task</label>
+        <textarea id="dispatch-task" rows="2" placeholder="Describe the task for this agent…"></textarea>
+        <div class="dispatch-row">
+          <code id="dispatch-cmd"></code>
+          <select id="dispatch-model" aria-label="Model">
+            <option value="sonnet">Sonnet</option>
+            <option value="haiku">Haiku</option>
+            <option value="opus">Opus</option>
+          </select>
+          <button id="run-agent" class="primary-btn">Run</button>
+          <button id="copy-cmd" class="primary-btn">Copy</button>
+        </div>
+        <p class="dispatch-note">Runs a real headless agent — first output can take ~30s.</p>
+        <pre id="dispatch-stream" class="dispatch-stream" hidden></pre>
+        <div class="dispatch-run-row">
+          <span id="dispatch-status"></span>
+          <button id="dispatch-cancel-btn" class="ghost-btn" hidden>Cancel</button>
+        </div>
+        <p class="confirm-note">Or copy the command to run in Claude Code (Task tool) or via the CLI.</p>
+      </div>
+
+      <details class="agent-body-wrap">
+        <summary>Full agent definition</summary>
+        <pre id="agent-modal-body"></pre>
+      </details>
+    </div>
+  </div>
+
+  <!-- Agent card template -->
+  <template id="agent-card-tpl">
+    <article class="mem-card agent-card">
+      <header class="card-head">
+        <h3 class="card-key"></h3>
+        <span class="card-source agent-cat"></span>
+      </header>
+      <p class="card-value agent-card-desc"></p>
+      <footer class="card-foot">
+        <span class="card-time agent-tool-count"></span>
+        <span class="agent-open">View →</span>
+      </footer>
+    </article>
+  </template>
+
+  <!-- Card template -->
+  <template id="card-tpl">
+    <article class="mem-card">
+      <header class="card-head">
+        <h3 class="card-key"></h3>
+        <span class="card-source"></span>
+      </header>
+      <p class="card-value"></p>
+      <div class="card-tags"></div>
+      <footer class="card-foot">
+        <span class="card-time"></span>
+        <button class="card-del" aria-label="Delete memory">Delete</button>
+      </footer>
+    </article>
+  </template>
+
+  <script src="dashboard.js"></script>
+</body>
+</html>
