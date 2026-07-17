@@ -206,15 +206,18 @@ setInterval(loadStats, 15000); // keep tiles + backend status fresh
 const views = {
   memory: document.getElementById('view-memory'),
   agents: document.getElementById('view-agents'),
+  learning: document.getElementById('view-learning'),
 };
 const railItems = document.querySelectorAll('.rail-item[data-view]');
 let agentsLoaded = false;
+let learningLoaded = false;
 
 function showView(name) {
   if (!views[name]) return;
   for (const [k, v] of Object.entries(views)) v.hidden = (k !== name);
   railItems.forEach(b => b.classList.toggle('active', b.dataset.view === name));
   if (name === 'agents' && !agentsLoaded) loadAgents();
+  if (name === 'learning' && !learningLoaded) loadLearning();
 }
 railItems.forEach(b => b.addEventListener('click', () => { if (!b.disabled) showView(b.dataset.view); }));
 
@@ -334,3 +337,102 @@ ag.copy.addEventListener('click', async () => {
   catch (_) { toast('Copy failed — select the text manually', true); }
 });
 document.addEventListener('keydown', (e) => { if (e.key === 'Escape' && !ag.overlay.hidden) closeAgent(); });
+
+// ===================================================================
+// Learning
+// ===================================================================
+const lr = {
+  learnings: document.getElementById('lr-learnings'), skills: document.getElementById('lr-skills'),
+  errors: document.getElementById('lr-errors'), sessions: document.getElementById('lr-sessions'),
+  notice: document.getElementById('lr-notice'),
+  learningsList: document.getElementById('lr-learnings-list'),
+  errorsList: document.getElementById('lr-errors-list'),
+  skillsList: document.getElementById('lr-skills-list'),
+  substrate: document.getElementById('lr-substrate'),
+  refresh: document.getElementById('learning-refresh'),
+};
+
+function parseTags(raw) {
+  if (Array.isArray(raw)) return raw;
+  if (!raw) return [];
+  try { const a = JSON.parse(raw); return Array.isArray(a) ? a : []; } catch (_) { return String(raw).split(',').map(s => s.trim()).filter(Boolean); }
+}
+function esc(s) { const d = document.createElement('div'); d.textContent = s == null ? '' : String(s); return d.innerHTML; }
+function emptyNote(msg) { return `<div class="empty" style="padding:28px 8px"><p style="margin:0;color:var(--text-faint)">${esc(msg)}</p></div>`; }
+
+async function loadLearning() {
+  try {
+    const d = await api('/learning');
+    learningLoaded = true;
+    const s = d.stats || {};
+    lr.learnings.textContent = s.learnings ?? 0;
+    lr.skills.textContent = s.skillsUsed ?? 0;
+    lr.errors.textContent = s.errors ?? 0;
+    lr.sessions.textContent = s.sessions ?? 0;
+
+    if (!d.available) {
+      lr.notice.hidden = false;
+      lr.notice.textContent = '⚠ ' + (d.reason || 'AgentDB not available') + ' — showing memory-store signals only.';
+    } else {
+      lr.notice.hidden = true;
+    }
+
+    // Lessons
+    lr.learningsList.innerHTML = (d.learnings && d.learnings.length)
+      ? d.learnings.map(l => {
+          const tags = parseTags(l.tags).map(t => `<span class="chip">#${esc(t)}</span>`).join('');
+          const imp = (l.importance || 'normal').toLowerCase();
+          return `<div class="lr-item">
+            <div class="lr-item-head">
+              <span class="lr-badge">${esc(l.category || 'general')}</span>
+              <span class="lr-badge imp-${imp === 'high' ? 'high' : 'normal'}">${esc(l.importance || 'normal')}</span>
+              <span class="lr-time">${esc(timeAgo(l.created_at))}</span>
+            </div>
+            <div class="lr-content">${esc(l.content)}</div>
+            ${tags ? `<div class="lr-tags">${tags}</div>` : ''}
+          </div>`;
+        }).join('')
+      : emptyNote('No lessons recorded yet. They accumulate as the assistant works across sessions.');
+
+    // Mistakes → fixes
+    lr.errorsList.innerHTML = (d.errors && d.errors.length)
+      ? d.errors.map(e => `<div class="lr-item">
+          <div class="lr-item-head">
+            <span class="lr-badge err">${esc(e.error_type || 'error')}</span>
+            <span class="lr-time">${esc(timeAgo(e.created_at))}</span>
+          </div>
+          <div class="lr-content">${esc(e.error_message)}</div>
+          ${e.fix_applied ? `<div class="lr-fix"><b>Fix:</b> ${esc(e.fix_applied)}</div>` : ''}
+          ${e.file_path ? `<div class="lr-file">${esc(e.file_path)}</div>` : ''}
+        </div>`).join('')
+      : emptyNote('No mistakes logged yet.');
+
+    // Skills
+    const maxUses = Math.max(1, ...(d.skills || []).map(s2 => s2.uses || 0));
+    lr.skillsList.innerHTML = (d.skills && d.skills.length)
+      ? d.skills.map(s2 => {
+          const pct = Math.round(((s2.uses || 0) / maxUses) * 100);
+          const rate = s2.uses ? Math.round(((s2.successes || 0) / s2.uses) * 100) : 0;
+          return `<div class="lr-skill">
+            <span class="lr-skill-name">${esc(s2.skill_name)}</span>
+            <span class="lr-skill-bar"><span class="lr-skill-fill" style="width:${pct}%"></span></span>
+            <span class="lr-skill-meta">${s2.uses}× · ${rate}% ok</span>
+          </div>`;
+        }).join('')
+      : emptyNote('No skills applied yet.');
+
+    // Substrate footer
+    const r = d.ranked || {};
+    const ms = d.memoryStore || {};
+    lr.substrate.innerHTML = [
+      `<span><b>AgentDB:</b> ${d.available ? (d.dbSizeKb || 0) + ' KB' : 'unavailable'}</span>`,
+      `<span><b>Knowledge facts:</b> ${(d.stats && d.stats.knowledge) ?? 0}</span>`,
+      `<span><b>Ranked context:</b> ${r.entries ?? 0} entries${r.computedAt ? ' · ' + timeAgo(new Date(r.computedAt).toISOString()) : ''}</span>`,
+      `<span><b>Long-term memory:</b> ${ms.total ?? 0} entries (${ms.autoCaptured ?? 0} auto-captured)</span>`,
+    ].join('');
+  } catch (err) {
+    toast('Learning load failed: ' + err.message, true);
+  }
+}
+
+lr.refresh.addEventListener('click', () => { learningLoaded = false; loadLearning(); });

@@ -24,8 +24,8 @@
         <button class="rail-item" data-view="agents">
           <span class="rail-ico">🤖</span><span>Agents</span>
         </button>
-        <button class="rail-item" data-view="learning" disabled title="Next building block">
-          <span class="rail-ico">📈</span><span>Learning</span><span class="soon">soon</span>
+        <button class="rail-item" data-view="learning">
+          <span class="rail-ico">📈</span><span>Learning</span>
         </button>
         <button class="rail-item" data-view="system" disabled title="Next building block">
           <span class="rail-ico">⚙️</span><span>System</span><span class="soon">soon</span>
@@ -130,6 +130,44 @@
           <p>No agents match your filters.</p>
         </div>
       </div><!-- /view-agents -->
+
+      <!-- Learning view -->
+      <div id="view-learning" class="view" hidden>
+        <header class="page-head">
+          <div>
+            <h1>Learning</h1>
+            <p class="subtitle">What the system has picked up across sessions — lessons, fixed mistakes, and skills applied.</p>
+          </div>
+          <button id="learning-refresh" class="ghost-btn" title="Refresh">↻ Refresh</button>
+        </header>
+
+        <section class="stat-row" aria-label="Learning statistics">
+          <div class="stat-tile"><div class="stat-val" id="lr-learnings">—</div><div class="stat-lbl">Lessons learned</div></div>
+          <div class="stat-tile"><div class="stat-val" id="lr-skills">—</div><div class="stat-lbl">Skills applied</div></div>
+          <div class="stat-tile"><div class="stat-val" id="lr-errors">—</div><div class="stat-lbl">Mistakes logged</div></div>
+          <div class="stat-tile"><div class="stat-val" id="lr-sessions">—</div><div class="stat-lbl">Sessions</div></div>
+        </section>
+
+        <div id="lr-notice" class="lr-notice" hidden></div>
+
+        <div class="lr-columns">
+          <section class="lr-col">
+            <h2 class="lr-h">🎓 Lessons learned</h2>
+            <div id="lr-learnings-list" class="lr-list"></div>
+          </section>
+          <section class="lr-col">
+            <h2 class="lr-h">🔧 Mistakes → fixes</h2>
+            <div id="lr-errors-list" class="lr-list"></div>
+          </section>
+        </div>
+
+        <section class="lr-skills-block">
+          <h2 class="lr-h">⚡ Skills applied</h2>
+          <div id="lr-skills-list" class="lr-skills"></div>
+        </section>
+
+        <div class="lr-substrate" id="lr-substrate"></div>
+      </div><!-- /view-learning -->
     </main>
   </div>
 

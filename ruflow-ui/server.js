@@ -567,6 +567,74 @@ app.get('/api/agents/:name', (req, res) => {
 });
 
 // ---------------------------------------------------------------------------
+// Learning — surface the self-learning ledger from the AgentDB (ruflow.db)
+// ---------------------------------------------------------------------------
+
+const AGENTDB_FILE = path.join(__dirname, '..', 'data', 'memory', 'ruflow.db');
+const RANKED_FILE = path.join(__dirname, '..', '.claude-flow', 'data', 'ranked-context.json');
+let sqlJsPromise = null;
+
+function getSqlJs() {
+  if (!sqlJsPromise) {
+    try { sqlJsPromise = require('sql.js')(); }
+    catch (_) { sqlJsPromise = Promise.resolve(null); }
+  }
+  return sqlJsPromise;
+}
+
+async function openLearningDb() {
+  const SQL = await getSqlJs();
+  if (!SQL || !fs.existsSync(AGENTDB_FILE)) return null;
+  try { return new SQL.Database(fs.readFileSync(AGENTDB_FILE)); } catch (_) { return null; }
+}
+
+function dbRows(db, sql) {
+  try {
+    const r = db.exec(sql);
+    if (!r[0]) return [];
+    const cols = r[0].columns;
+    return r[0].values.map(v => Object.fromEntries(v.map((x, i) => [cols[i], x])));
+  } catch (_) { return []; }
+}
+
+function memoryLearningStats() {
+  const entries = loadMemoryStore().entries || [];
+  let auto = 0;
+  for (const e of entries) if (e.source === 'auto') auto++;
+  return { total: entries.length, autoCaptured: auto };
+}
+
+function readRanked() {
+  try {
+    const j = JSON.parse(fs.readFileSync(RANKED_FILE, 'utf-8'));
+    return { entries: (j.entries || []).length, computedAt: j.computedAt || null };
+  } catch (_) { return { entries: 0, computedAt: null }; }
+}
+
+app.get('/api/learning', async (req, res) => {
+  const ranked = readRanked();
+  const memoryStore = memoryLearningStats();
+  const db = await openLearningDb();
+  if (!db) {
+    return res.json({ available: false, reason: 'AgentDB (sql.js) not available in this environment', ranked, memoryStore });
+  }
+  const count = (t) => { const r = dbRows(db, `SELECT COUNT(*) AS c FROM ${t}`); return r[0] ? r[0].c : 0; };
+  const stats = {
+    sessions: count('sessions'), learnings: count('learnings'), skillsUsed: count('skills_used'),
+    errors: count('errors'), knowledge: count('knowledge'), tasks: count('tasks'),
+  };
+  const learnings = dbRows(db, "SELECT category, content, importance, tags, created_at FROM learnings ORDER BY created_at DESC LIMIT 25");
+  const errors = dbRows(db, "SELECT error_type, error_message, fix_applied, file_path, created_at FROM errors ORDER BY created_at DESC LIMIT 25");
+  const skills = dbRows(db, "SELECT skill_name, COUNT(*) AS uses, SUM(success) AS successes FROM skills_used GROUP BY skill_name ORDER BY uses DESC LIMIT 25");
+  const knowledge = dbRows(db, "SELECT category, key, value, updated_at FROM knowledge ORDER BY updated_at DESC LIMIT 25");
+  const sessions = dbRows(db, "SELECT id, summary, model, total_tasks, total_edits, total_errors, started_at FROM sessions ORDER BY started_at DESC LIMIT 10");
+  db.close();
+  let dbSizeKb = 0;
+  try { dbSizeKb = Math.round(fs.statSync(AGENTDB_FILE).size / 1024); } catch (_) {}
+  res.json({ available: true, dbSizeKb, stats, learnings, errors, skills, knowledge, sessions, ranked, memoryStore });
+});
+
+// ---------------------------------------------------------------------------
 // HTTP + WebSocket server
 // ---------------------------------------------------------------------------
 
